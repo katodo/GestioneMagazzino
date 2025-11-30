@@ -1448,25 +1448,29 @@ function openSlotModal(col, row){
         });
       });
 
-      tbody.querySelectorAll('button[data-remove-id]').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const id = btn.getAttribute('data-remove-id');
-          if (!confirm('Rimuovere la posizione per questo articolo?')) return;
-          try {
-            const url = CLEAR_URL_TEMPLATE.replace('0', id);
-            const resp = await fetch(url, { method: 'POST' });
-            const jj = await resp.json().catch(()=>({ok:false}));
-            if (!jj.ok) {
-              alert(jj.error || 'Errore nella rimozione.');
-              return;
-            }
-            // ricarica elenco cella
-            openSlotModal(col, row);
-          } catch (e) {
-            alert('Errore di comunicazione.');
+    tbody.querySelectorAll('button[data-remove-id]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-remove-id');
+        if (!confirm('Rimuovere la posizione per questo articolo?')) return;
+        try {
+          const url = CLEAR_URL_TEMPLATE.replace('0', id);
+          const resp = await fetch(url, { method: 'POST' });
+          const jj = await resp.json().catch(()=>({ok:false}));
+          if (!jj.ok) {
+            alert(jj.error || 'Errore nella rimozione.');
+            return;
           }
-        });
+          // chiudo il modal e ricarico la pagina principale
+          const modalEl = document.getElementById('slotModal');
+          const inst = bootstrap.Modal.getInstance(modalEl);
+          if (inst) inst.hide();
+          location.reload();
+        } catch (e) {
+          alert('Errore di comunicazione.');
+        }
       });
+    });
+
     })
     .catch(() => {
       tbody.innerHTML = '';
