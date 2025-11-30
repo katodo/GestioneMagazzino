@@ -1042,16 +1042,30 @@ BASE_TMPL = """\
     .navbar-brand { font-weight: 600; }
     .form-section { background: #fff; border-radius: 10px; padding: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
     .badge-color { display:inline-block; width:12px; height:12px; border-radius:50%; margin-right:6px; vertical-align:middle; }
-    .grid-wrap { overflow:auto; border:1px solid #ddd; border-radius:8px; background:#fff; max-height: 65vh; }
-    .grid-table { border-collapse: separate; border-spacing: 0; font-size: 12px; }
+        .grid-wrap {
+      overflow:auto;
+      border:1px solid #ddd;
+      border-radius:8px;
+      background:#fff;
+      max-height: 65vh;
+      width: 100%;
+    }
+    .grid-table {
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: 12px;
+      width: 100%;
+      table-layout: fixed;
+    }
     .grid-table th, .grid-table td {
       border: 1px solid #e5e5e5;
       text-align: center;
-      width: 76px; min-width: 76px;
+      min-width: 48px;
       height: 48px; min-height: 48px;
       padding: 0;
       vertical-align: middle;
     }
+
     .grid-table thead th { position: sticky; top: 0; background: #f1f1f1; z-index: 3; }
     .grid-table .rowhdr { position: sticky; left: 0; background: #f7f7f7; z-index: 2; width: 54px; min-width: 54px; padding-right: 6px; text-align: right; }
     .grid-table thead .rowhdr { z-index: 4; }
@@ -1253,6 +1267,7 @@ INDEX_TMPL = """\
       </div>
       <div class="modal-footer">
         <button class="btn btn-primary">Assegna</button>
+        <button type="button" class="btn btn-outline-secondary" id="btnNewItem">Nuovo articolo…</button>
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annulla</button>
       </div>
       </form>
@@ -1264,6 +1279,7 @@ INDEX_TMPL = """\
 <script>
 {% if is_admin %}
 const UNPLACED = {{ unplaced_json|tojson }};
+
 function openAssignModal(col, row, catFilter){
   const modal = new bootstrap.Modal(document.getElementById('assignModal'));
   document.getElementById('slotLabel').textContent = `${col}${row}`;
@@ -1275,38 +1291,48 @@ function openAssignModal(col, row, catFilter){
   if (catFilter) list = list.filter(x => x.category_id == parseInt(catFilter));
   list.forEach(x=>{
     const o = document.createElement('option');
-    o.value = x.id; o.textContent = x.caption; o.dataset.cat = x.category_id;
+    o.value = x.id;
+    o.textContent = x.caption;
+    o.dataset.cat = x.category_id;
     sel.appendChild(o);
   });
   document.getElementById('totCnt').textContent = list.length;
-  document.getElementById('flt').value='';
+  document.getElementById('flt').value = '';
   document.getElementById('assignError').classList.add('d-none');
   modal.show();
 }
+
 document.addEventListener('DOMContentLoaded', function(){
   const grid = document.getElementById('grid');
   if (!grid) return;
+
+  // Click su cella → apre modal assegnazione
   grid.addEventListener('click', function(e){
     const td = e.target.closest('td');
     if (!td) return;
     if (td.classList.contains('cell-blocked')) { alert('Cella bloccata.'); return; }
     if (!{{ 'true' if is_admin else 'false' }}) return;
-    const col = td.dataset.col, row = td.dataset.row;
+    const col = td.dataset.col;
+    const row = td.dataset.row;
     const cat = td.dataset.cat;
     if (cat === 'blocked') { alert('Cella bloccata.'); return; }
     openAssignModal(col, row, cat || null);
   });
 
+  // Filtro lista articoli non assegnati
   document.getElementById('flt')?.addEventListener('input', function(){
     const term = this.value.toLowerCase();
     const sel = document.getElementById('item_id');
+    let visibleCount = 0;
     Array.from(sel.options).forEach(opt=>{
       const show = !term || opt.textContent.toLowerCase().includes(term);
       opt.hidden = !show;
+      if (show) visibleCount++;
     });
-    document.getElementById('totCnt').textContent = Array.from(sel.options).filter(o=>!o.hidden).length;
+    document.getElementById('totCnt').textContent = visibleCount;
   });
 
+  // Submit assegnazione
   document.getElementById('assignForm')?.addEventListener('submit', async function(ev){
     ev.preventDefault();
     const fd = new FormData(ev.target);
@@ -1320,11 +1346,34 @@ document.addEventListener('DOMContentLoaded', function(){
       location.reload();
     }
   });
+
+  // Bottone "Nuovo articolo…" → va alla pagina admin con posizione precompilata
+  const btnNewItem = document.getElementById('btnNewItem');
+  if (btnNewItem) {
+    btnNewItem.addEventListener('click', function () {
+      const cabId = document.getElementById('cab_id').value || grid.dataset.cab;
+      const col   = document.getElementById('col_code').value;
+      const row   = document.getElementById('row_num').value;
+
+      if (!cabId || !col || !row) {
+        return;
+      }
+
+      const params = new URLSearchParams({
+        new_for_cab: cabId,
+        new_for_col: col,
+        new_for_row: row
+      });
+
+      window.location.href = '{{ url_for("admin_items") }}?' + params.toString();
+    });
+  }
 });
 {% endif %}
 </script>
 {% endblock %}
 """
+
 
 LOGIN_TMPL = """\
 {% extends "base.html" %}
@@ -1572,7 +1621,32 @@ document.addEventListener('DOMContentLoaded', ()=>{
     toggleSpecificFields();
   });
   document.getElementById('stdSel').addEventListener('change', ()=>switchDatalist('stdSel','sizeInput'));
+
+  // Se arrivo qui da "Nuovo articolo…" sulla griglia,
+  // precompilo i campi posizione nel form "Nuovo articolo"
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const cab = params.get('new_for_cab');
+    const col = params.get('new_for_col');
+    const row = params.get('new_for_row');
+
+    if (cab && col && row) {
+      const formNew = document.querySelector('form[action="{{ url_for("add_item") }}"]');
+      if (formNew) {
+        const cabSel = formNew.querySelector('select[name="cabinet_id"]');
+        const colInp = formNew.querySelector('input[name="col_code"]');
+        const rowInp = formNew.querySelector('input[name="row_num"]');
+        if (cabSel) cabSel.value = cab;
+        if (colInp) colInp.value = col;
+        if (rowInp) rowInp.value = row;
+        cabSel?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  } catch (e) {
+    // in caso di browser vecchi senza URLSearchParams, ignoro l'errore
+  }
 });
+
 </script>
 {% endblock %}
 """
