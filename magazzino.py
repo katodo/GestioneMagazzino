@@ -356,6 +356,14 @@ def admin_items():
     locations  = Location.query.order_by(Location.name).all()
     cabinets   = Cabinet.query.order_by(Cabinet.name).all()
 
+    assignments = (
+        db.session.query(Assignment.item_id, Cabinet.name, Slot.col_code, Slot.row_num)
+        .join(Slot, Assignment.slot_id == Slot.id)
+        .join(Cabinet, Slot.cabinet_id == Cabinet.id)
+        .all()
+    )
+    pos_by_item = {a.item_id: make_full_position(a.name, a.col_code, a.row_num) for a in assignments}
+
     metric_sizes = ["M2","M2.5","M3","M4","M5","M6","M8","M10","M12","M14","M16"]
     unc_sizes    = ["#2-56","#4-40","#6-32","#8-32","#10-24","1/4-20","5/16-18","3/8-16","1/2-13"]
     unf_sizes    = ["#2-64","#4-48","#6-40","#8-36","#10-32","1/4-28","5/16-24","3/8-24","1/2-20"]
@@ -384,8 +392,10 @@ def admin_items():
         metric_sizes=metric_sizes, unc_sizes=unc_sizes, unf_sizes=unf_sizes,
         rondelle_id=rondelle_id,
         viti_id=viti_id, torrette_id=torrette_id,
-        drive_options=drive_options, standoff_cfgs=standoff_cfgs
+        drive_options=drive_options, standoff_cfgs=standoff_cfgs,
+        pos_by_item=pos_by_item
     )
+
 
 @app.route("/admin/to_place")
 @login_required
@@ -863,6 +873,49 @@ def grid_assign():
         return jsonify({"ok":False, "error":str(e)}), 400
     return jsonify({"ok":True})
 
+@app.route("/admin/slot_items")
+@login_required
+def slot_items():
+    cab_id = request.args.get("cabinet_id", type=int)
+    col_code = (request.args.get("col_code") or "").strip().upper()
+    row_num = request.args.get("row_num", type=int)
+    if not (cab_id and col_code and row_num):
+        return jsonify({"ok": False, "error": "Parametri mancanti."}), 400
+
+    slot = Slot.query.filter_by(cabinet_id=cab_id, col_code=col_code, row_num=row_num).first()
+    if not slot:
+        # nessuno slot definito => cella vuota
+        return jsonify({"ok": True, "items": []})
+
+    assigns = (
+        db.session.query(Assignment, Item, Category)
+        .join(Item, Assignment.item_id == Item.id)
+        .join(Category, Item.category_id == Category.id, isouter=True)
+        .filter(Assignment.slot_id == slot.id)
+        .order_by(Assignment.compartment_no)
+        .all()
+    )
+
+    items = []
+    for a, it, cat in assigns:
+        items.append({
+            "id": it.id,
+            "name": auto_name_for(it),
+            "quantity": it.quantity,
+            "category": cat.name if cat else None,
+            "color": cat.color if cat else "#999999",
+        })
+    return jsonify({"ok": True, "items": items})
+
+
+@app.route("/admin/slot_items/<int:item_id>/clear", methods=["POST"])
+@login_required
+def slot_clear_item(item_id):
+    Assignment.query.filter_by(item_id=item_id).delete()
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
 # ===================== ETICHETTE PDF =====================
 @app.route("/admin/labels/pdf", methods=["POST"])
 @login_required
@@ -1091,6 +1144,7 @@ BASE_TMPL = """\
       <a class="navbar-brand" href="/">Magazzino</a>
       <div class="d-flex gap-2">
         {% if current_user.is_authenticated %}
+          <a href="{{ url_for('index') }}" class="btn btn-outline-light btn-sm">Magazzino principale</a>
           <a href="{{ url_for('admin_items') }}" class="btn btn-outline-light btn-sm">Articoli</a>
           <a href="{{ url_for('to_place') }}" class="btn btn-outline-light btn-sm">Da posizionare</a>
           <a href="{{ url_for('admin_categories') }}" class="btn btn-outline-light btn-sm">Categorie</a>
@@ -1274,11 +1328,42 @@ INDEX_TMPL = """\
     </div>
   </div>
 </div>
+
+<!-- Modal contenuto cella -->
+<div class="modal fade" id="slotModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Contenuto cella <span id="slotLabel2"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Chiudi"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="slot_cab_id" value="{{ grid.cab.id if grid.cab else '' }}">
+        <input type="hidden" id="slot_col_code">
+        <input type="hidden" id="slot_row_num">
+        <div id="slotEmptyMsg" class="text-muted small d-none">Nessun articolo assegnato a questa cella.</div>
+        <table class="table table-sm align-middle mb-0" id="slotItemsTable">
+          <thead>
+            <tr><th>Articolo</th><th>Q.ta</th><th>Azioni</th></tr>
+          </thead>
+          <tbody id="slotItemsBody"></tbody>
+        </table>
+        <div id="slotError" class="text-danger small mt-2 d-none"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" id="btnSlotAdd">Aggiungi articolo senza posizione…</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Chiudi</button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endif %}
+
 
 <script>
 {% if is_admin %}
 const UNPLACED = {{ unplaced_json|tojson }};
+const CLEAR_URL_TEMPLATE = '{{ url_for("slot_clear_item", item_id=0) }}';
 
 function openAssignModal(col, row, catFilter){
   const modal = new bootstrap.Modal(document.getElementById('assignModal'));
@@ -1302,21 +1387,122 @@ function openAssignModal(col, row, catFilter){
   modal.show();
 }
 
+function openSlotModal(col, row){
+  const grid = document.getElementById('grid');
+  const cabId = document.getElementById('cab_id')?.value || grid?.dataset.cab;
+  if (!cabId) return;
+
+  const modalEl = document.getElementById('slotModal');
+  const modal = new bootstrap.Modal(modalEl);
+
+  document.getElementById('slotLabel2').textContent = `${col}${row}`;
+  document.getElementById('slot_col_code').value = col;
+  document.getElementById('slot_row_num').value = row;
+  document.getElementById('slotError').classList.add('d-none');
+  document.getElementById('slotEmptyMsg').classList.add('d-none');
+
+  const tbody = document.getElementById('slotItemsBody');
+  tbody.innerHTML = '<tr><td colspan="3"><small class="text-muted">Caricamento...</small></td></tr>';
+
+  fetch(`{{ url_for("slot_items") }}?cabinet_id=${encodeURIComponent(cabId)}&col_code=${encodeURIComponent(col)}&row_num=${encodeURIComponent(row)}`)
+    .then(r => r.json())
+    .then(j => {
+      tbody.innerHTML = '';
+      if (!j.ok) {
+        document.getElementById('slotError').textContent = j.error || 'Errore caricamento contenuto.';
+        document.getElementById('slotError').classList.remove('d-none');
+        return;
+      }
+      if (!j.items || !j.items.length) {
+        document.getElementById('slotEmptyMsg').classList.remove('d-none');
+        return;
+      }
+
+      j.items.forEach(it => {
+        const tr = document.createElement('tr');
+
+        const tdName = document.createElement('td');
+        tdName.innerHTML = `<span class="badge-color" style="background:${it.color};"></span> ${it.name}`;
+
+        const tdQty = document.createElement('td');
+        tdQty.textContent = (it.quantity !== null && it.quantity !== undefined) ? it.quantity : '';
+
+        const tdActions = document.createElement('td');
+        tdActions.className = 'text-nowrap';
+        tdActions.innerHTML = `
+          <button type="button" class="btn btn-sm btn-outline-primary me-1" data-edit-id="${it.id}">Modifica</button>
+          <button type="button" class="btn btn-sm btn-outline-danger" data-remove-id="${it.id}">Rimuovi posizione</button>
+        `;
+
+        tr.appendChild(tdName);
+        tr.appendChild(tdQty);
+        tr.appendChild(tdActions);
+        tbody.appendChild(tr);
+      });
+
+      // azioni: modifica / rimuovi
+      tbody.querySelectorAll('button[data-edit-id]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-edit-id');
+          window.location.href = '/admin/items/' + id + '/edit';
+        });
+      });
+
+      tbody.querySelectorAll('button[data-remove-id]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = btn.getAttribute('data-remove-id');
+          if (!confirm('Rimuovere la posizione per questo articolo?')) return;
+          try {
+            const url = CLEAR_URL_TEMPLATE.replace('0', id);
+            const resp = await fetch(url, { method: 'POST' });
+            const jj = await resp.json().catch(()=>({ok:false}));
+            if (!jj.ok) {
+              alert(jj.error || 'Errore nella rimozione.');
+              return;
+            }
+            // ricarica elenco cella
+            openSlotModal(col, row);
+          } catch (e) {
+            alert('Errore di comunicazione.');
+          }
+        });
+      });
+    })
+    .catch(() => {
+      tbody.innerHTML = '';
+      document.getElementById('slotError').textContent = 'Errore di comunicazione.';
+      document.getElementById('slotError').classList.remove('d-none');
+    });
+
+  modal.show();
+}
+
 document.addEventListener('DOMContentLoaded', function(){
   const grid = document.getElementById('grid');
   if (!grid) return;
 
-  // Click su cella → apre modal assegnazione
+  // Click su cella:
+  //  - cella bloccata → avviso
+  //  - cella occupata → modal contenuto cella
+  //  - cella vuota    → modal assegnazione (articoli senza posizione)
   grid.addEventListener('click', function(e){
     const td = e.target.closest('td');
     if (!td) return;
     if (td.classList.contains('cell-blocked')) { alert('Cella bloccata.'); return; }
     if (!{{ 'true' if is_admin else 'false' }}) return;
+
     const col = td.dataset.col;
     const row = td.dataset.row;
     const cat = td.dataset.cat;
+
+    if (!col || !row) return;
     if (cat === 'blocked') { alert('Cella bloccata.'); return; }
-    openAssignModal(col, row, cat || null);
+
+    if (td.classList.contains('cell-used')) {
+      openSlotModal(col, row);
+    } else {
+      openAssignModal(col, row, cat || null);
+    }
   });
 
   // Filtro lista articoli non assegnati
@@ -1368,6 +1554,22 @@ document.addEventListener('DOMContentLoaded', function(){
       window.location.href = '{{ url_for("admin_items") }}?' + params.toString();
     });
   }
+
+  // Bottone nel modal contenuto cella per aggiungere articolo senza posizione
+  const btnSlotAdd = document.getElementById('btnSlotAdd');
+  if (btnSlotAdd) {
+    btnSlotAdd.addEventListener('click', function () {
+      const col = document.getElementById('slot_col_code').value;
+      const row = document.getElementById('slot_row_num').value;
+      if (!col || !row) return;
+
+      const modalEl = document.getElementById('slotModal');
+      const inst = bootstrap.Modal.getInstance(modalEl);
+      inst?.hide();
+
+      openAssignModal(col, row, null);
+    });
+  }
 });
 {% endif %}
 </script>
@@ -1411,6 +1613,7 @@ ADMIN_DASH_TMPL = r"""\
           <th>Dim. princ. (mm)</th>
           <th>Materiale</th>
           <th>Q.ta</th>
+          <th>Posizione</th>
           <th>Azione</th>
         </tr>
       </thead>
@@ -1425,6 +1628,7 @@ ADMIN_DASH_TMPL = r"""\
           <td>{{ '%.2f'|format(it.main_size_mm) if it.main_size_mm is not none else '' }}</td>
           <td>{{ it.material.name if it.material else '' }}</td>
           <td>{{ it.quantity }}</td>
+          <td>{{ pos_by_item.get(it.id, '') }}</td>
           <td class="text-nowrap">
             <a href="{{ url_for('edit_item', item_id=it.id) }}" class="btn btn-sm btn-outline-primary">Modifica</a>
             <form method="post" action="{{ url_for('delete_item', item_id=it.id) }}" class="d-inline" onsubmit="return confirm('Eliminare articolo?')">
