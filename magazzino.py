@@ -597,8 +597,23 @@ def clear_position(item_id):
 @app.route("/admin/categories")
 @login_required
 def admin_categories():
-    cats = Category.query.order_by(Category.name).all()
-    return render_template("admin/categories.html", categories=cats)
+    categories = Category.query.order_by(Category.name).all()
+    materials  = Material.query.order_by(Material.name).all()
+    finishes   = Finish.query.order_by(Finish.name).all()
+    # elenco sottotipi con categoria associata (per mostrare ed editare)
+    subtypes   = (
+        db.session.query(Subtype, Category)
+        .join(Category, Subtype.category_id == Category.id)
+        .order_by(Category.name, Subtype.name)
+        .all()
+    )
+    return render_template(
+        "admin/categories.html",
+        categories=categories,
+        materials=materials,
+        finishes=finishes,
+        subtypes=subtypes,
+    )
 
 @app.route("/admin/categories/add", methods=["POST"])
 @login_required
@@ -637,6 +652,163 @@ def delete_category(cat_id):
 
 def _flash_back(msg, kind, endpoint):
     flash(msg, kind); return redirect(url_for(endpoint))
+
+@app.route("/admin/subtypes/add", methods=["POST"])
+@login_required
+def add_subtype():
+    name = (request.form.get("name") or "").strip()
+    try:
+        category_id = int(request.form.get("category_id") or 0)
+    except Exception:
+        category_id = 0
+
+    if category_id <= 0:
+        return _flash_back("Seleziona una categoria valida per il sottotipo.", "danger", "admin_categories")
+    if len(name) < 2:
+        return _flash_back("Nome sottotipo troppo corto.", "danger", "admin_categories")
+
+    # univoco per categoria (rispetta il vincolo uq_subtype_per_category)
+    exists = Subtype.query.filter_by(category_id=category_id, name=name).first()
+    if exists:
+        return _flash_back("Esiste già un sottotipo con questo nome per la categoria selezionata.", "danger", "admin_categories")
+
+    db.session.add(Subtype(category_id=category_id, name=name))
+    db.session.commit()
+    flash("Sottotipo aggiunto.", "success")
+    return redirect(url_for("admin_categories"))
+
+
+@app.route("/admin/subtypes/<int:st_id>/update", methods=["POST"])
+@login_required
+def update_subtype(st_id):
+    st = Subtype.query.get_or_404(st_id)
+    name = (request.form.get("name") or "").strip()
+    try:
+        category_id = int(request.form.get("category_id") or st.category_id)
+    except Exception:
+        category_id = st.category_id
+
+    if len(name) < 2:
+        return _flash_back("Nome sottotipo troppo corto.", "danger", "admin_categories")
+
+    # evita duplicati nella stessa categoria
+    clash = (
+        Subtype.query
+        .filter(Subtype.id != st.id,
+                Subtype.category_id == category_id,
+                Subtype.name == name)
+        .first()
+    )
+    if clash:
+        return _flash_back("Esiste già un sottotipo con questo nome per la categoria selezionata.", "danger", "admin_categories")
+
+    st.name = name
+    st.category_id = category_id
+    db.session.commit()
+    flash("Sottotipo aggiornato.", "success")
+    return redirect(url_for("admin_categories"))
+
+
+@app.route("/admin/subtypes/<int:st_id>/delete", methods=["POST"])
+@login_required
+def delete_subtype(st_id):
+    st = Subtype.query.get_or_404(st_id)
+    used = Item.query.filter_by(subtype_id=st.id).first()
+    if used:
+        flash("Impossibile eliminare: ci sono articoli associati a questo sottotipo.", "danger")
+    else:
+        db.session.delete(st)
+        db.session.commit()
+        flash("Sottotipo eliminato.", "success")
+    return redirect(url_for("admin_categories"))
+
+@app.route("/admin/materials/add", methods=["POST"])
+@login_required
+def add_material():
+    name = (request.form.get("name") or "").strip()
+    if len(name) < 2:
+        return _flash_back("Nome materiale troppo corto.", "danger", "admin_categories")
+    if Material.query.filter_by(name=name).first():
+        return _flash_back("Materiale già esistente.", "danger", "admin_categories")
+
+    db.session.add(Material(name=name))
+    db.session.commit()
+    flash("Materiale aggiunto.", "success")
+    return redirect(url_for("admin_categories"))
+
+
+@app.route("/admin/materials/<int:mat_id>/update", methods=["POST"])
+@login_required
+def update_material(mat_id):
+    mat = Material.query.get_or_404(mat_id)
+    name = (request.form.get("name") or "").strip()
+    if len(name) < 2:
+        return _flash_back("Nome materiale troppo corto.", "danger", "admin_categories")
+    if Material.query.filter(Material.id != mat.id, Material.name == name).first():
+        return _flash_back("Esiste già un materiale con questo nome.", "danger", "admin_categories")
+
+    mat.name = name
+    db.session.commit()
+    flash("Materiale aggiornato.", "success")
+    return redirect(url_for("admin_categories"))
+
+
+@app.route("/admin/materials/<int:mat_id>/delete", methods=["POST"])
+@login_required
+def delete_material(mat_id):
+    mat = Material.query.get_or_404(mat_id)
+    used = Item.query.filter_by(material_id=mat.id).first()
+    if used:
+        flash("Impossibile eliminare: ci sono articoli che usano questo materiale.", "danger")
+    else:
+        db.session.delete(mat)
+        db.session.commit()
+        flash("Materiale eliminato.", "success")
+    return redirect(url_for("admin_categories"))
+
+@app.route("/admin/finishes/add", methods=["POST"])
+@login_required
+def add_finish():
+    name = (request.form.get("name") or "").strip()
+    if len(name) < 2:
+        return _flash_back("Nome finitura troppo corto.", "danger", "admin_categories")
+    if Finish.query.filter_by(name=name).first():
+        return _flash_back("Finitura già esistente.", "danger", "admin_categories")
+
+    db.session.add(Finish(name=name))
+    db.session.commit()
+    flash("Finitura aggiunta.", "success")
+    return redirect(url_for("admin_categories"))
+
+
+@app.route("/admin/finishes/<int:fin_id>/update", methods=["POST"])
+@login_required
+def update_finish(fin_id):
+    fin = Finish.query.get_or_404(fin_id)
+    name = (request.form.get("name") or "").strip()
+    if len(name) < 2:
+        return _flash_back("Nome finitura troppo corto.", "danger", "admin_categories")
+    if Finish.query.filter(Finish.id != fin.id, Finish.name == name).first():
+        return _flash_back("Esiste già una finitura con questo nome.", "danger", "admin_categories")
+
+    fin.name = name
+    db.session.commit()
+    flash("Finitura aggiornata.", "success")
+    return redirect(url_for("admin_categories"))
+
+
+@app.route("/admin/finishes/<int:fin_id>/delete", methods=["POST"])
+@login_required
+def delete_finish(fin_id):
+    fin = Finish.query.get_or_404(fin_id)
+    used = Item.query.filter_by(finish_id=fin.id).first()
+    if used:
+        flash("Impossibile eliminare: ci sono articoli che usano questa finitura.", "danger")
+    else:
+        db.session.delete(fin)
+        db.session.commit()
+        flash("Finitura eliminata.", "success")
+    return redirect(url_for("admin_categories"))
 
 # ===================== ADMIN: CONFIGURAZIONE =====================
 @app.route("/admin/config")
@@ -2072,24 +2244,31 @@ document.addEventListener('DOMContentLoaded', ()=>{
 ADMIN_CATS_TMPL = r"""\
 {% extends "base.html" %}
 {% block content %}
-<h3>Categorie</h3>
+<h3>Categorie, sottotipi, materiali e finiture</h3>
+
 <div class="row">
   <div class="col-lg-6">
     <div class="form-section">
-      <h5 class="mb-2">Elenco</h5>
+      <h5 class="mb-2">Categorie</h5>
       <table class="table table-striped" id="tblCats">
-        <thead><tr><th>ID</th><th>Nome</th><th>Colore</th><th>Azione</th></tr></thead>
+        <thead>
+          <tr><th>ID</th><th>Nome</th><th>Colore</th><th>Azione</th></tr>
+        </thead>
         <tbody>
           {% for c in categories %}
           <tr>
             <td>{{ c.id }}</td>
             <td>
               <form method="post" action="{{ url_for('update_category', cat_id=c.id) }}" class="row g-2 align-items-center">
-                <div class="col-md-5"><input class="form-control" name="name" value="{{ c.name }}"></div>
-                <div class="col-md-3"><input type="color" class="form-control form-control-color" name="color" value="{{ c.color }}"></div>
+                <div class="col-md-5">
+                  <input class="form-control" name="name" value="{{ c.name }}">
+                </div>
+                <div class="col-md-3">
+                  <input type="color" class="form-control form-control-color" name="color" value="{{ c.color }}">
+                </div>
                 <div class="col-md-4">
                   <button class="btn btn-sm btn-primary">Salva</button>
-                  <button formaction="{{ url_for('delete_category', cat_id=c.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger">Elimina</button>
+                  <button formaction="{{ url_for('delete_category', cat_id=c.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger" onclick="return confirm('Eliminare categoria?')">Elimina</button>
                 </div>
               </form>
             </td>
@@ -2101,18 +2280,175 @@ ADMIN_CATS_TMPL = r"""\
       </table>
     </div>
   </div>
+
   <div class="col-lg-6">
     <div class="form-section">
       <h5 class="mb-2">Nuova categoria</h5>
       <form method="post" action="{{ url_for('add_category') }}" class="row g-2">
-        <div class="col-md-6"><input class="form-control" name="name" placeholder="Nome"></div>
-        <div class="col-md-3"><input type="color" class="form-control form-control-color" name="color" value="#607D8B"></div>
-        <div class="col-md-3"><button class="btn btn-primary">Aggiungi</button></div>
+        <div class="col-md-6">
+          <input class="form-control" name="name" placeholder="Nome categoria">
+        </div>
+        <div class="col-md-3">
+          <input type="color" class="form-control form-control-color" name="color" value="#607D8B">
+        </div>
+        <div class="col-md-3">
+          <button class="btn btn-primary w-100">Aggiungi</button>
+        </div>
       </form>
     </div>
   </div>
 </div>
-<script>$(function(){ if ($.fn.DataTable) $('#tblCats').DataTable({pageLength:50, order:[[0,'asc']]});});</script>
+
+<hr class="my-3">
+
+<div class="form-section mb-3">
+  <h5 class="mb-2">Sottotipi (forme)</h5>
+
+  <form method="post" action="{{ url_for('add_subtype') }}" class="row g-2 mb-2">
+    <div class="col-md-4">
+      <select class="form-select" name="category_id" required>
+        <option value="">Categoria...</option>
+        {% for c in categories %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-5">
+      <input class="form-control" name="name" placeholder="Nome sottotipo (es. Testa cilindrica)">
+    </div>
+    <div class="col-md-3">
+      <button class="btn btn-primary w-100">Aggiungi</button>
+    </div>
+  </form>
+
+  <table class="table table-sm table-striped" id="tblSubtypes">
+    <thead>
+      <tr><th>ID</th><th>Categoria</th><th>Nome</th><th>Azione</th></tr>
+    </thead>
+    <tbody>
+      {% for st, c in subtypes %}
+      <tr>
+        <td>{{ st.id }}</td>
+        <td colspan="3">
+          <form method="post" action="{{ url_for('update_subtype', st_id=st.id) }}" class="row g-2 align-items-center">
+            <div class="col-md-4">
+              <select class="form-select" name="category_id">
+                {% for cat in categories %}
+                  <option value="{{ cat.id }}" {{ 'selected' if cat.id == st.category_id else '' }}>{{ cat.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-4">
+              <input class="form-control" name="name" value="{{ st.name }}">
+            </div>
+            <div class="col-md-4">
+              <button class="btn btn-sm btn-primary">Salva</button>
+              <button formaction="{{ url_for('delete_subtype', st_id=st.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger" onclick="return confirm('Eliminare sottotipo?')">Elimina</button>
+            </div>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="row">
+  <div class="col-lg-6">
+    <div class="form-section mb-3">
+      <h5 class="mb-2">Materiali</h5>
+      <table class="table table-striped" id="tblMaterials">
+        <thead>
+          <tr><th>ID</th><th>Nome</th><th>Azione</th></tr>
+        </thead>
+        <tbody>
+          {% for m in materials %}
+          <tr>
+            <td>{{ m.id }}</td>
+            <td>
+              <form method="post" action="{{ url_for('update_material', mat_id=m.id) }}" class="row g-2 align-items-center">
+                <div class="col-md-8">
+                  <input class="form-control" name="name" value="{{ m.name }}">
+                </div>
+                <div class="col-md-4">
+                  <button class="btn btn-sm btn-primary">Salva</button>
+                  <button formaction="{{ url_for('delete_material', mat_id=m.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger" onclick="return confirm('Eliminare materiale?')">Elimina</button>
+                </div>
+              </form>
+            </td>
+            <td></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="form-section">
+      <h5 class="mb-2">Nuovo materiale</h5>
+      <form method="post" action="{{ url_for('add_material') }}" class="row g-2">
+        <div class="col-md-8">
+          <input class="form-control" name="name" placeholder="Descrizione materiale">
+        </div>
+        <div class="col-md-4">
+          <button class="btn btn-primary w-100">Aggiungi</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="form-section mb-3">
+      <h5 class="mb-2">Finiture</h5>
+      <table class="table table-striped" id="tblFinishes">
+        <thead>
+          <tr><th>ID</th><th>Nome</th><th>Azione</th></tr>
+        </thead>
+        <tbody>
+          {% for f in finishes %}
+          <tr>
+            <td>{{ f.id }}</td>
+            <td>
+              <form method="post" action="{{ url_for('update_finish', fin_id=f.id) }}" class="row g-2 align-items-center">
+                <div class="col-md-8">
+                  <input class="form-control" name="name" value="{{ f.name }}">
+                </div>
+                <div class="col-md-4">
+                  <button class="btn btn-sm btn-primary">Salva</button>
+                  <button formaction="{{ url_for('delete_finish', fin_id=f.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger" onclick="return confirm('Eliminare finitura?')">Elimina</button>
+                </div>
+              </form>
+            </td>
+            <td></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="form-section">
+      <h5 class="mb-2">Nuova finitura</h5>
+      <form method="post" action="{{ url_for('add_finish') }}" class="row g-2">
+        <div class="col-md-8">
+          <input class="form-control" name="name" placeholder="Descrizione finitura">
+        </div>
+        <div class="col-md-4">
+          <button class="btn btn-primary w-100">Aggiungi</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+$(function(){
+  if ($.fn.DataTable) {
+    $('#tblCats').DataTable({pageLength:50, order:[[0,'asc']]});
+    $('#tblSubtypes').DataTable({pageLength:50, order:[[0,'asc']]});
+    $('#tblMaterials').DataTable({pageLength:50, order:[[0,'asc']]});
+    $('#tblFinishes').DataTable({pageLength:50, order:[[0,'asc']]});
+  }
+});
+</script>
 {% endblock %}
 """
 
