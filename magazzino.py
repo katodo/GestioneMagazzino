@@ -1087,6 +1087,276 @@ def slot_clear_item(item_id):
     db.session.commit()
     return jsonify({"ok": True})
 
+# ===================== ASSEGNAMENTO AUTOMATICO =====================
+def _iter_cabinet_walk(cabinet: Cabinet, start_col: str, start_row: int, direction: str):
+    """
+    Generatore di celle a partire da (start_col, start_row) nella cassettiera indicata.
+    direction = "H" (orizzontale) o "V" (verticale).
+    """
+    if not cabinet:
+        raise ValueError("Cassettiera inesistente.")
+    cols = list(iter_cols_upto(cabinet.cols_max or "Z"))
+    rows = list(range(1, min(128, max(1, int(cabinet.rows_max))) + 1))
+
+    start_col = (start_col or "").strip().upper()
+    if start_col not in cols:
+        raise ValueError("Colonna di partenza fuori dalla cassettiera selezionata.")
+    try:
+        row_num_int = int(start_row)
+    except Exception:
+        raise ValueError("Riga di partenza non valida.")
+    if row_num_int not in rows:
+        raise ValueError("Riga di partenza fuori dalla cassettiera selezionata.")
+
+    col_index0 = cols.index(start_col)
+    row_index0 = rows.index(row_num_int)
+    direction = (direction or "H").upper()
+
+    if direction == "V":
+        # dall'alto verso il basso, poi colonna successiva
+        for ci in range(col_index0, len(cols)):
+            for ri in range(row_index0 if ci == col_index0 else 0, len(rows)):
+                yield cols[ci], rows[ri]
+    else:
+        # da sinistra a destra, poi riga successiva
+        for ri in range(row_index0, len(rows)):
+            for ci in range(col_index0 if ri == row_index0 else 0, len(cols)):
+                yield cols[ci], rows[ri]
+
+
+def _auto_assign_category(category_id: int,
+                          cabinet_id: int,
+                          start_col: str,
+                          start_row: int,
+                          direction: str,
+                          primary_key: str,
+                          secondary_key: str,
+                          count: int,
+                          clear_occupied: bool):
+    """
+    Esegue l'assegnamento automatico di `count` articoli (non ancora posizionati)
+    della categoria indicata, a partire dalla cella indicata nella cassettiera scelta.
+    Ritorna un dict con qualche statistica sull'operazione.
+    """
+    if count <= 0:
+        raise ValueError("Il numero di articoli da posizionare deve essere maggiore di zero.")
+
+    cab = db.session.get(Cabinet, int(cabinet_id))
+    if not cab:
+        raise ValueError("Cassettiera inesistente.")
+
+    # Articoli non ancora posizionati per la categoria
+    subq = select(Assignment.item_id)
+    q = Item.query.filter(Item.id.not_in(subq), Item.category_id == int(category_id))
+
+    sort_map = {
+        "id":           Item.id,
+        "thread_size":  Item.thread_size,
+        "main_size_mm": Item.main_size_mm,
+        "material":     Item.material_id,
+    }
+    order_cols = []
+    if primary_key in sort_map:
+        order_cols.append(sort_map[primary_key])
+    if secondary_key in sort_map and secondary_key != primary_key:
+        order_cols.append(sort_map[secondary_key])
+    if not order_cols:
+        order_cols = [Item.id]
+    q = q.order_by(*order_cols)
+
+    all_candidates = q.all()
+    if not all_candidates:
+        raise ValueError("Nessun articolo non posizionato per la categoria selezionata.")
+    items = all_candidates[:count]
+    requested = len(items)
+    total_unplaced = len(all_candidates)
+
+    assignments_plan = []   # (item, col_code, row_num)
+    skipped_occupied = []   # celle saltate perché già occupate (clear_occupied=False)
+    reused_slots = set()    # celle che verranno liberate e riutilizzate (clear_occupied=True)
+
+    for col_code, row_num in _iter_cabinet_walk(cab, start_col, start_row, direction):
+        if len(assignments_plan) >= requested:
+            break
+        slot = Slot.query.filter_by(cabinet_id=cab.id, col_code=col_code, row_num=row_num).first()
+        if slot and slot.is_blocked:
+            continue
+        has_content = False
+        if slot:
+            has_content = Assignment.query.filter_by(slot_id=slot.id).first() is not None
+        if has_content and not clear_occupied:
+            skipped_occupied.append((col_code, row_num))
+            continue
+        if has_content and clear_occupied:
+            reused_slots.add((col_code, row_num))
+        assignments_plan.append((items[len(assignments_plan)], col_code, row_num))
+
+    if not assignments_plan:
+        if skipped_occupied and not clear_occupied:
+            raise ValueError("Tutte le celle nel percorso sono già popolate o bloccate; nessun articolo assegnato.")
+        raise ValueError("Nessuna cella disponibile per l'assegnamento automatico.")
+
+    cleared_slots = 0
+    assigned = 0
+    try:
+        if clear_occupied and reused_slots:
+            for col_code, row_num in sorted(reused_slots):
+                slot = Slot.query.filter_by(cabinet_id=cab.id, col_code=col_code, row_num=row_num).first()
+                if slot:
+                    deleted = Assignment.query.filter_by(slot_id=slot.id).delete()
+                    if deleted:
+                        cleared_slots += 1
+
+        for item, col_code, row_num in assignments_plan:
+            _assign_position(item, cab.id, col_code, row_num)
+            assigned += 1
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+
+    collisions_count = len(reused_slots) if clear_occupied else len(skipped_occupied)
+    return {
+        "assigned": assigned,
+        "cleared_slots": cleared_slots,
+        "collisions": collisions_count,
+        "requested": requested,
+        "total_unplaced": total_unplaced,
+    }
+
+
+@app.route("/admin/auto_assign", methods=["GET", "POST"])
+@login_required
+def auto_assign():
+    cabinets = Cabinet.query.order_by(Cabinet.name).all()
+    categories = Category.query.order_by(Category.name).all()
+    sort_options = [
+        ("main_size_mm", "Misura principale (mm)"),
+        ("thread_size",  "Filettatura"),
+        ("material",     "Materiale"),
+        ("id",           "ID articolo"),
+    ]
+
+    # Valori di default letti dalla querystring
+    form_cabinet_id  = request.args.get("cabinet_id", type=int)
+    form_category_id = request.args.get("category_id", type=int)
+    primary_key      = request.args.get("primary_key") or "main_size_mm"
+    secondary_key    = request.args.get("secondary_key") or "material"
+    direction        = (request.args.get("direction") or "H").upper()
+    count_val        = request.args.get("count", type=int) or 10
+    start_col        = (request.args.get("start_col") or "").strip().upper()
+    start_row        = request.args.get("start_row", type=int)
+    clear_occupied   = bool(request.args.get("clear_occupied", type=int))
+
+    if not form_cabinet_id and cabinets:
+        form_cabinet_id = cabinets[0].id
+
+    if request.method == "POST":
+        form = request.form
+        try:
+            form_cabinet_id  = int(form.get("cabinet_id") or 0)
+            form_category_id = int(form.get("category_id") or 0)
+            primary_key      = form.get("primary_key") or "main_size_mm"
+            secondary_key    = form.get("secondary_key") or ""
+            direction        = (form.get("direction") or "H").upper()
+            count_val        = max(1, int(form.get("count") or "1"))
+            start_col        = (form.get("start_col") or "").strip().upper()
+            start_row        = int(form.get("start_row") or "0")
+            clear_occupied   = bool(form.get("clear_occupied"))
+        except Exception:
+            flash("Parametri non validi per l'assegnamento automatico.", "danger")
+            return redirect(url_for("auto_assign"))
+
+        if not (form_cabinet_id and form_category_id and start_col and start_row):
+            flash("Seleziona cassettiera, categoria e cella di partenza.", "danger")
+            return redirect(url_for(
+                "auto_assign",
+                cabinet_id=form_cabinet_id or "",
+                category_id=form_category_id or "",
+                primary_key=primary_key,
+                secondary_key=secondary_key,
+                direction=direction,
+                count=count_val,
+                start_col=start_col,
+                start_row=start_row,
+                clear_occupied=int(clear_occupied),
+            ))
+
+        try:
+            res = _auto_assign_category(
+                category_id=form_category_id,
+                cabinet_id=form_cabinet_id,
+                start_col=start_col,
+                start_row=start_row,
+                direction=direction,
+                primary_key=primary_key,
+                secondary_key=secondary_key,
+                count=count_val,
+                clear_occupied=clear_occupied,
+            )
+            assigned       = res["assigned"]
+            cleared_slots  = res["cleared_slots"]
+            collisions     = res["collisions"]
+            requested      = res["requested"]
+            total_unplaced = res["total_unplaced"]
+
+            if assigned == 0:
+                flash("Nessun articolo assegnato: controlla i parametri o la cella di partenza.", "warning")
+            else:
+                msg = f"Assegnati {assigned} articoli."
+                if requested > assigned:
+                    msg += f" Solo {assigned} articoli su {requested} richiesti hanno trovato una cella disponibile."
+                if cleared_slots:
+                    msg += f" De-allocate {cleared_slots} celle precedentemente popolate."
+                elif collisions and not clear_occupied:
+                    msg += f" {collisions} celle nel percorso erano già popolate e non sono state modificate."
+                msg += f" Articoli non posizionati rimanenti per la categoria: {total_unplaced - assigned}."
+                flash(msg, "success")
+        except ValueError as e:
+            flash(str(e), "danger")
+        except Exception as e:
+            flash(f"Errore nell'assegnamento automatico: {e}", "danger")
+
+        return redirect(url_for(
+            "auto_assign",
+            cabinet_id=form_cabinet_id,
+            category_id=form_category_id,
+            primary_key=primary_key,
+            secondary_key=secondary_key,
+            direction=direction,
+            count=count_val,
+            start_col=start_col,
+            start_row=start_row,
+            clear_occupied=int(clear_occupied),
+        ))
+
+    # GET o dopo redirect: preparo i dati per il template
+    grid = build_full_grid(form_cabinet_id) if form_cabinet_id else {"rows": [], "cols": [], "cells": {}, "cab": None}
+
+    unplaced_count = None
+    if form_category_id:
+        subq = select(Assignment.item_id)
+        q = Item.query.filter(Item.id.not_in(subq), Item.category_id == form_category_id)
+        unplaced_count = q.count()
+
+    return render_template(
+        "admin/auto_assign.html",
+        cabinets=cabinets,
+        categories=categories,
+        sort_options=sort_options,
+        grid=grid,
+        form_cabinet_id=form_cabinet_id,
+        form_category_id=form_category_id,
+        primary_key=primary_key,
+        secondary_key=secondary_key,
+        direction=direction,
+        count=count_val,
+        start_col=start_col,
+        start_row=start_row,
+        clear_occupied=clear_occupied,
+        unplaced_count=unplaced_count,
+    )
+
 
 # ===================== ETICHETTE PDF =====================
 @app.route("/admin/labels/pdf", methods=["POST"])
@@ -1319,6 +1589,7 @@ BASE_TMPL = """\
           <a href="{{ url_for('index') }}" class="btn btn-outline-light btn-sm">Magazzino principale</a>
           <a href="{{ url_for('admin_items') }}" class="btn btn-outline-light btn-sm">Articoli</a>
           <a href="{{ url_for('to_place') }}" class="btn btn-outline-light btn-sm">Da posizionare</a>
+          <a href="{{ url_for('auto_assign') }}" class="btn btn-outline-light btn-sm">Assegnamento</a>
           <a href="{{ url_for('admin_categories') }}" class="btn btn-outline-light btn-sm">Categorie</a>
           <a href="{{ url_for('admin_config') }}" class="btn btn-outline-light btn-sm">Configurazione</a>
           <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Logout</a>
@@ -2617,6 +2888,171 @@ ADMIN_TOPLACE_TMPL = r"""\
 {% endblock %}
 """
 
+ADMIN_AUTOASSIGN_TMPL = r"""\
+{% extends "base.html" %}
+{% block content %}
+<h3>Assegnamento automatico cassettiera</h3>
+
+<div class="form-section mb-3">
+  <form method="post">
+    <div class="row g-2">
+      <div class="col-md-3">
+        <label class="form-label">Cassettiera</label>
+        <select name="cabinet_id" class="form-select" required>
+          {% for c in cabinets %}
+            <option value="{{ c.id }}" {{ 'selected' if c.id == form_cabinet_id else '' }}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Categoria</label>
+        <select name="category_id" class="form-select" required>
+          {% for c in categories %}
+            <option value="{{ c.id }}" {{ 'selected' if c.id == form_category_id else '' }}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+        {% if unplaced_count is not none %}
+          <div class="form-text">Articoli non posizionati: {{ unplaced_count }}</div>
+        {% endif %}
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Chiave primaria</label>
+        <select name="primary_key" class="form-select">
+          {% for v, label in sort_options %}
+            <option value="{{ v }}" {{ 'selected' if v == primary_key else '' }}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Chiave secondaria</label>
+        <select name="secondary_key" class="form-select">
+          <option value="">(nessuna)</option>
+          {% for v, label in sort_options %}
+            <option value="{{ v }}" {{ 'selected' if v == secondary_key else '' }}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Numero di articoli</label>
+        <input type="number" min="1" class="form-control" name="count" value="{{ count or 10 }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Direzione</label>
+        <select name="direction" class="form-select">
+          <option value="H" {{ 'selected' if direction == 'H' else '' }}>Orizzontale</option>
+          <option value="V" {{ 'selected' if direction == 'V' else '' }}>Verticale</option>
+        </select>
+        <div class="form-text">Orizzontale: da sinistra a destra, poi riga successiva. Verticale: dall'alto in basso, poi colonna successiva.</div>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Cella di partenza</label>
+        <div class="input-group">
+          <span class="input-group-text">Col</span>
+          <input type="text" class="form-control" name="start_col" id="start_col" value="{{ start_col or '' }}" maxlength="2" placeholder="es. A">
+          <span class="input-group-text">Riga</span>
+          <input type="number" class="form-control" name="start_row" id="start_row" value="{{ start_row or '' }}" min="1" max="128">
+        </div>
+        <div class="form-text">Puoi anche cliccare una cella nella griglia qui sotto.</div>
+      </div>
+      <div class="col-md-3 d-flex align-items-end">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" value="1" id="clear_occupied" name="clear_occupied" {{ 'checked' if clear_occupied else '' }}>
+          <label class="form-check-label" for="clear_occupied">
+            De-alloca celle già popolate nel percorso
+          </label>
+        </div>
+      </div>
+      <div class="col-12 text-end">
+        <button class="btn btn-primary">Assegna automaticamente</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<h4>Griglia cassettiera</h4>
+<div class="legend mb-2">
+  <span style="background:black"></span> Bloccata
+  {% for c in categories %}
+    <span style="background:{{ c.color }}; margin-left:12px;"></span> {{ c.name }}
+  {% endfor %}
+</div>
+
+<div class="grid-wrap p-2">
+  {% if grid.rows and grid.cols %}
+  <table class="grid-table table table-sm mb-0" id="autoGrid">
+    <thead>
+      <tr>
+        <th class="rowhdr"></th>
+        {% for col in grid.cols %}
+          <th>{{ col }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in grid.rows %}
+      <tr>
+        <th class="rowhdr">{{ r }}</th>
+        {% for col in grid.cols %}
+          {% set key = col ~ '-' ~ r %}
+          {% set cell = grid.cells.get(key) %}
+          {% if not cell %}
+            <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="">
+              <div class="cell-inner" style="color:#777; text-shadow:none; font-weight:500;">&nbsp;</div>
+            </td>
+          {% else %}
+            {% if cell.blocked %}
+              <td class="cell-blocked" data-col="{{ col }}" data-row="{{ r }}" data-cat="blocked">
+                <div class="cell-inner">&nbsp;</div>
+              </td>
+            {% else %}
+              {% set bg = cell.entries[0].color if cell.entries else '#6c757d' %}
+              <td class="cell-used" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" style="background:{{ bg }}">
+                <div class="cell-inner">
+                  {% for e in cell.entries[:2] %}
+                    <div>{{ e.text }}</div>
+                  {% endfor %}
+                  {% if cell.entries|length > 2 %}
+                    <div>+{{ cell.entries|length-2 }}</div>
+                  {% endif %}
+                </div>
+              </td>
+            {% endif %}
+          {% endif %}
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <div class="text-muted p-3">Nessuna cassettiera selezionata.</div>
+  {% endif %}
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  const grid = document.getElementById('autoGrid');
+  if (!grid) return;
+  grid.addEventListener('click', function(e){
+    const td = e.target.closest('td');
+    if (!td) return;
+    if (td.classList.contains('cell-blocked')) {
+      alert('Cella bloccata, non utilizzabile.');
+      return;
+    }
+    const col = td.dataset.col;
+    const row = td.dataset.row;
+    if (!col || !row) return;
+    document.getElementById('start_col').value = col;
+    document.getElementById('start_row').value = row;
+    grid.querySelectorAll('td').forEach(c => c.classList.remove('table-primary'));
+    td.classList.add('table-primary');
+  });
+});
+</script>
+{% endblock %}
+"""
+
+
 # Registra template
 app.jinja_loader = DictLoader({
     "base.html": BASE_TMPL,
@@ -2627,6 +3063,7 @@ app.jinja_loader = DictLoader({
     "admin/categories.html": ADMIN_CATS_TMPL,
     "admin/config.html": ADMIN_CONFIG_TMPL,
     "admin/to_place.html": ADMIN_TOPLACE_TMPL,
+    "admin/auto_assign.html": ADMIN_AUTOASSIGN_TMPL,
 })
 
 # ===================== INIT / MIGRAZIONI / SEED =====================
