@@ -306,17 +306,67 @@ def build_full_grid(cabinet_id:int):
         "cab": {"id": cab.id, "name": cab.name, "comp": cab.compartments_per_slot}
     }
 
-def short_cell_text(it:Item)->str:
-    parts=[]
-    if it.thread_size: parts.append(it.thread_size)
-    if it.main_size_mm:
-        val = int(it.main_size_mm) if float(it.main_size_mm).is_integer() else it.main_size_mm
-        parts.append(("Øe" if is_washer(it) else "L=") + f"{val}")
-    if is_standoff(it) and it.standoff_config:
-        parts.append(it.standoff_config)
-    if is_screw(it) and it.drive:
-        parts.append(it.drive.replace(" (", " (")[:6])  # breve
-    return " · ".join(parts[:2]) if parts else ""
+def short_cell_text(item: Item) -> str:
+    # Layout dedicato per le rondelle:
+    #   riga 1: Misura / Øi
+    #   riga 2: Øe / spessore
+    if is_washer(item):
+        line1_parts = []
+        line2_parts = []
+
+        if item.thread_size:
+            line1_parts.append(item.thread_size)
+
+        if item.inner_d_mm:
+            v = item.inner_d_mm
+            vv = int(v) if abs(v - int(v)) < 0.01 else v
+            line1_parts.append(f"Øi{vv}")
+
+        if item.main_size_mm:
+            v = item.main_size_mm
+            vv = int(v) if abs(v - int(v)) < 0.01 else v
+            line2_parts.append(f"Øe{vv}")
+
+        if item.thickness_mm:
+            v = item.thickness_mm
+            vv = int(v) if abs(v - int(v)) < 0.01 else v
+            line2_parts.append(f"s{vv}")
+
+        lines = []
+        if line1_parts:
+            lines.append(" ".join(str(p) for p in line1_parts))
+        if line2_parts:
+            lines.append(" ".join(str(p) for p in line2_parts))
+
+        if not lines:
+            lines.append(auto_name_for(item))
+
+        return "\n".join(lines[:2])
+
+    # Layout generico per tutte le altre categorie
+    parts = []
+    if item.thread_size:
+        parts.append(item.thread_size)
+
+    if item.main_size_mm:
+        v = item.main_size_mm
+        vv = int(v) if abs(v - int(v)) < 0.01 else v
+        if is_standoff(item):
+            parts.append(f"L={vv}")
+        else:
+            parts.append(f"L={vv}")
+
+    if is_standoff(item) and item.standoff_config:
+        parts.append(item.standoff_config)
+
+    if is_screw(item) and item.drive:
+        parts.append(item.drive)
+
+    if not parts:
+        parts.append(auto_name_for(item))
+
+    return "\n".join(parts[:2])
+
 
 @app.route("/api/items/<int:item_id>.json")
 def api_item(item_id):
@@ -1152,6 +1202,7 @@ def _auto_assign_category(category_id: int,
     sort_map = {
         "id":           Item.id,
         "thread_size":  Item.thread_size,
+        "thickness_mm": Item.thickness_mm,
         "main_size_mm": Item.main_size_mm,
         "material":     Item.material_id,
     }
@@ -1232,6 +1283,7 @@ def auto_assign():
     categories = Category.query.order_by(Category.name).all()
     sort_options = [
         ("main_size_mm", "Misura principale (mm)"),
+        ("thickness_mm",  "Spessore (mm)"),
         ("thread_size",  "Filettatura"),
         ("material",     "Materiale"),
         ("id",           "ID articolo"),
@@ -1445,13 +1497,162 @@ def labels_pdf():
     cat_font = "Helvetica-Bold"
     cat_size = 7.4
 
+    def _fmt_mm(value):
+        """Formatta una misura in mm come intero o con una sola cifra decimale."""
+        if value is None:
+            return None
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return None
+        if abs(v - round(v)) < 0.01:
+            return str(int(round(v)))
+        return f"{v:.1f}".rstrip("0").rstrip(".")
+
+    def _line1(item):
+        """
+        Riga 1: Categoria + Sottotipo + Misura (thread_size)
+        Es: 'Rondelle Piana M8'
+        """
+        parts = []
+        if item.category:
+            parts.append(item.category.name)
+        if item.subtype:
+            parts.append(item.subtype.name)
+        if item.thread_size:
+            parts.append(item.thread_size)
+        return " ".join(parts)
+
+    def _line2(item):
+        """
+        Riga 2: dati tecnici in base al tipo.
+        - Viti:      Impronta, L<dim principale>, materiale
+        - Rondelle:  Øi<interno>, Øe<esterno>, sp<spessore>
+        - Torrette:  config, L<dim principale>, materiale
+        - Altre:     Dim<dim principale>mm, sp<spessore>, materiale
+        """
+        parts = []
+
+        # Viti
+        if is_screw(item):
+            if item.drive:
+                parts.append(item.drive)
+            v = _fmt_mm(item.main_size_mm)
+            if v:
+                parts.append(f"L{v}")
+            if item.material:
+                parts.append(item.material.name)
+
+        # Rondelle
+        elif is_washer(item):
+            v_i = _fmt_mm(getattr(item, "inner_d_mm", None))
+            if v_i:
+                parts.append(f"Øi{v_i}")
+            v_e = _fmt_mm(item.main_size_mm)
+            if v_e:
+                parts.append(f"Øe{v_e}")
+            v_s = _fmt_mm(getattr(item, "thickness_mm", None))
+            if v_s:
+                parts.append(f"sp{v_s}")
+
+        # Torrette
+        elif is_standoff(item):
+            if item.standoff_config:
+                parts.append(item.standoff_config)
+            v = _fmt_mm(item.main_size_mm)
+            if v:
+                parts.append(f"L{v}")
+            if item.material:
+                parts.append(item.material.name)
+
+        # Altre tipologie
+        else:
+            v = _fmt_mm(item.main_size_mm)
+            if v:
+                parts.append(f"Dim{v}mm")
+            v_s = _fmt_mm(getattr(item, "thickness_mm", None))
+            if v_s:
+                parts.append(f"sp{v_s}")
+            if item.material:
+                parts.append(item.material.name)
+
+        return " ".join(parts)
+
+
     qr_box = mm_to_pt(9) if include_qr else 0
     qr_margin = mm_to_pt(1)
+
+    def _fmt_mm(v):
+        if v is None:
+            return None
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return None
+        if abs(v - round(v)) < 0.01:
+            return str(int(round(v)))
+        return f"{v:.1f}".rstrip("0").rstrip(".")
+
+    def _type_text(item: Item) -> str:
+        # Base: name o descrizione auto-generata, senza la categoria duplicata
+        base = item.name or auto_name_for(item)
+        cat_name = item.category.name if item.category else ""
+        if cat_name and base.lower().startswith(cat_name.lower() + " "):
+            base = base[len(cat_name) + 1 :].lstrip()
+
+        # Layout dedicato per le rondelle: tipo + Øi + Øe + spessore
+        if is_washer(item):
+            parts = []
+
+            # Subtipo, senza ripetere "Rondelle/Rondella"
+            if getattr(item, "subtype", None) and item.subtype.name:
+                st = item.subtype.name
+                lower_st = st.lower()
+                if lower_st.startswith("rondell"):
+                    # elimina la parola iniziale "Rondelle"/"Rondella"
+                    st = st.split(" ", 1)[-1]
+                parts.append(st)
+
+            if item.thread_size:
+                parts.append(item.thread_size)
+
+            if item.inner_d_mm:
+                v = _fmt_mm(item.inner_d_mm)
+                if v is not None:
+                    parts.append(f"Øi{v}")
+
+            if item.main_size_mm:
+                v = _fmt_mm(item.main_size_mm)
+                if v is not None:
+                    parts.append(f"Øe{v}")
+
+            if item.thickness_mm:
+                v = _fmt_mm(item.thickness_mm)
+                if v is not None:
+                    parts.append(f"s{v}")
+
+            if parts:
+                return " ".join(parts)
+
+        # Per gli altri oggetti: se c'è spessore, aggiungi un breve "sX"
+        if item.thickness_mm:
+            v = _fmt_mm(item.thickness_mm)
+            if v is not None and f"s{v}" not in base:
+                base = f"{base} s{v}"
+
+        return base
+
+    def _single_line(text: str, font_name: str, font_size: float, max_width_pt: float) -> str:
+        """Restituisce una singola riga che entra nella larghezza disponibile."""
+        if not text:
+            return ""
+        lines = wrap_to_lines(text, font_name, font_size, max_width_pt, max_lines=1)
+        return lines[0] if lines else ""
 
     for idx, item in enumerate(items):
         col = idx % cols
         row = (idx // cols) % rows
-        if idx>0 and idx % (cols*rows) == 0:
+        if idx > 0 and idx % (cols * rows) == 0:
             c.showPage()
 
         x = x0 + col * (lab_w + gap)
@@ -1459,32 +1660,47 @@ def labels_pdf():
 
         crop_marks(x, y, lab_w, lab_h)
 
-        # barra colore categoria
+        # Barra colore categoria in alto
         try:
             colhex = item.category.color if item.category else "#000000"
-            c.setFillColor(HexColor(colhex)); c.rect(x, y + lab_h-2, lab_w, 2, stroke=0, fill=1)
+            c.setFillColor(HexColor(colhex))
+            c.rect(x, y + lab_h - 2, lab_w, 2, stroke=0, fill=1)
         except Exception:
             pass
 
         # area testuale a sinistra del QR
         text_right_limit = lab_w - (qr_box + qr_margin*2 if qr_box else 0) - mm_to_pt(1.5)
-        c.setFillColorRGB(0,0,0)
+        c.setFillColorRGB(0, 0, 0)
 
-        # 1) categoria
-        cat_name = item.category.name if item.category else ""
+        # punto di partenza dall'alto
         cy = y + lab_h - 3.5
-        if cat_name:
-            c.setFont(cat_font, cat_size)
-            c.drawString(x + mm_to_pt(1.5), cy - cat_size, cat_name)
-            cy -= (cat_size + 0.6)
 
-        # 2) Nome articolo (max 2 righe)
-        name_text = item.name or auto_name_for(item)
-        lines = wrap_to_lines(name_text, title_font, title_size, text_right_limit, max_lines=2)
-        c.setFont(title_font, title_size)
-        for ln in lines:
-            c.drawString(x + mm_to_pt(1.5), cy - title_size, ln)
-            cy -= (title_size + 0.6)
+        # --- Riga 1: Categoria + Sottotipo + Misura ---
+        line1_text = _line1(item)
+        if line1_text:
+            line1_lines = wrap_to_lines(line1_text, cat_font, cat_size, text_right_limit, max_lines=1)
+            if line1_lines:
+                c.setFont(cat_font, cat_size)
+                c.drawString(x + mm_to_pt(1.5), cy - cat_size, line1_lines[0])
+                cy -= (cat_size + 0.6)
+
+        # --- Riga 2: specifiche a seconda della categoria ---
+        line2_text = _line2(item)
+        if line2_text:
+            line2_lines = wrap_to_lines(line2_text, title_font, title_size, text_right_limit, max_lines=1)
+            if line2_lines:
+                c.setFont(title_font, title_size)
+                c.drawString(x + mm_to_pt(1.5), cy - title_size, line2_lines[0])
+                cy -= (title_size + 0.6)
+
+        # Fallback: se per qualche motivo non abbiamo scritto nulla, uso il nome completo
+        if not line1_text and not line2_text:
+            fallback = item.name or auto_name_for(item)
+            lines = wrap_to_lines(fallback, title_font, title_size, text_right_limit, max_lines=2)
+            c.setFont(title_font, title_size)
+            for ln in lines:
+                c.drawString(x + mm_to_pt(1.5), cy - title_size, ln)
+                cy -= (title_size + 0.6)
 
         # posizione in basso a sinistra (Cassettiera-XY)
         a = (db.session.query(Assignment, Slot, Cabinet)
@@ -1494,7 +1710,7 @@ def labels_pdf():
         if a:
             pos = make_full_position(a[2].name, a[1].col_code, a[1].row_num)
             c.setFont("Helvetica", 6)
-            c.drawString(x+mm_to_pt(1.5), y+1.8, pos)
+            c.drawString(x + mm_to_pt(1.5), y + 1.8, pos)
 
         # QR a destra
         if qr_box:
@@ -1504,14 +1720,13 @@ def labels_pdf():
                     url = f"{s.qr_base_url.rstrip('/')}/api/items/{item.id}.json"
                 else:
                     url = f"{request.host_url.rstrip('/')}/api/items/{item.id}.json"
-                from reportlab.graphics.barcode import qr as qrmod
-                from reportlab.graphics.shapes import Drawing
-                from reportlab.graphics import renderPDF
                 qr_code = qrmod.QrCodeWidget(url)
                 bounds = qr_code.getBounds()
-                w = bounds[2]-bounds[0]; h = bounds[3]-bounds[1]
-                scale = min(qr_box/w, qr_box/h)
-                d = Drawing(w, h); d.add(qr_code)
+                w = bounds[2] - bounds[0]
+                h = bounds[3] - bounds[1]
+                scale = min(qr_box / w, qr_box / h)
+                d = Drawing(w, h)
+                d.add(qr_code)
                 c.saveState()
                 c.translate(x + lab_w - qr_box - qr_margin, y + qr_margin)
                 c.scale(scale, scale)
@@ -1519,7 +1734,6 @@ def labels_pdf():
                 c.restoreState()
             except Exception:
                 pass
-
     c.save(); buf.seek(0)
     return send_file(buf, as_attachment=True, download_name="etichette.pdf", mimetype="application/pdf")
 
@@ -1646,7 +1860,7 @@ INDEX_TMPL = """\
 <table class="table table-striped table-hover" id="itemsTable">
   <thead><tr>
     <th>ID</th><th>Categoria</th><th>Descrizione</th><th>Misura</th>
-    <th>Dim. principale (mm)</th><th>Materiale</th><th>Quantità</th><th>Posizione</th>
+    <th>Dim. principale (mm)</th><th>Spessore (mm)</th><th>Materiale</th><th>Quantità</th><th>Posizione</th>
   </tr></thead>
   <tbody>
     {% for item in items %}
@@ -1656,6 +1870,7 @@ INDEX_TMPL = """\
       <td>{{ compose_caption(item) }}</td>
       <td>{{ item.thread_size }}</td>
       <td>{{ '%.2f'|format(item.main_size_mm) if item.main_size_mm is not none else '' }}</td>
+      <td>{{ '%.2f'|format(item.thickness_mm) if item.thickness_mm is not none else '' }}</td>
       <td>{{ item.material.name if item.material else '' }}</td>
       <td>{{ item.quantity }}</td>
       <td>{{ pos_by_item.get(item.id, '') }}</td>
@@ -2058,6 +2273,7 @@ ADMIN_DASH_TMPL = r"""\
           <th>Nome</th>
           <th>Misura</th>
           <th>Dim. princ. (mm)</th>
+          <th>Spessore (mm)</th>
           <th>Materiale</th>
           <th>Q.ta</th>
           <th>Posizione</th>
@@ -2073,6 +2289,7 @@ ADMIN_DASH_TMPL = r"""\
           <td>{{ compose_caption(it) }}</td>
           <td>{{ it.thread_size or "" }}</td>
           <td>{{ '%.2f'|format(it.main_size_mm) if it.main_size_mm is not none else '' }}</td>
+          <td>{{ '%.2f'|format(it.thickness_mm) if it.thickness_mm is not none else '' }}</td>
           <td>{{ it.material.name if it.material else '' }}</td>
           <td>{{ it.quantity }}</td>
           <td>{{ pos_by_item.get(it.id, '') }}</td>
