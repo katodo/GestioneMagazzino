@@ -172,28 +172,32 @@
         <th class="rowhdr">{{ r }}</th>
         {% for col in grid.cols %}
           {% set key = col ~ '-' ~ r %}
-          {% set cell = grid.cells.get(key) %}
-          {% if not cell %}
-            <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="">
-              <div class="cell-inner" style="color:#777; text-shadow:none; font-weight:500;">&nbsp;</div>
-            </td>
+          {% if grid.merge_skips and grid.merge_skips.get(key) %}
           {% else %}
-            {% if cell.blocked %}
-              <td class="cell-blocked" data-col="{{ col }}" data-row="{{ r }}" data-cat="blocked">—</td>
-            {% elif cell.entries and (cell.entries|length)>0 %}
-              {% set colhex = cell.entries[0].color %}
-              {% set texts = (cell.entries | map(attribute='text') | list) %}
-              <td class="cell-used" style="background: {{ colhex }}" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}">
-                <div class="cell-inner">
-                  {% if texts|length>0 %}<div>{{ texts[0] }}</div>{% endif %}
-                  {% if texts|length>1 %}<div>{{ texts[1] }}</div>{% endif %}
-                  {% if texts|length>2 %}<div>+{{ texts|length-2 }}</div>{% endif %}
-                </div>
-              </td>
-            {% else %}
+            {% set cell = grid.cells.get(key) %}
+            {% set merge = grid.merge_anchors.get(key) if grid.merge_anchors else None %}
+            {% if not cell %}
               <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="">
                 <div class="cell-inner" style="color:#777; text-shadow:none; font-weight:500;">&nbsp;</div>
               </td>
+            {% else %}
+              {% if cell.blocked %}
+                <td class="cell-blocked" data-col="{{ col }}" data-row="{{ r }}" data-cat="blocked" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>—</td>
+              {% elif cell.entries and (cell.entries|length)>0 %}
+                {% set colhex = cell.entries[0].color %}
+                {% set texts = (cell.entries | map(attribute='text') | list) %}
+                <td class="cell-used" style="background: {{ colhex }}" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
+                  <div class="cell-inner">
+                    {% if texts|length>0 %}<div>{{ texts[0] }}</div>{% endif %}
+                    {% if texts|length>1 %}<div>{{ texts[1] }}</div>{% endif %}
+                    {% if texts|length>2 %}<div>+{{ texts|length-2 }}</div>{% endif %}
+                  </div>
+                </td>
+              {% else %}
+                <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
+                  <div class="cell-inner" style="color:#777; text-shadow:none; font-weight:500;">&nbsp;</div>
+                </td>
+              {% endif %}
             {% endif %}
           {% endif %}
         {% endfor %}
@@ -257,7 +261,7 @@
         <div id="slotEmptyMsg" class="text-muted small d-none">Nessun articolo assegnato a questa cella.</div>
         <table class="table table-sm align-middle mb-0" id="slotItemsTable">
           <thead>
-            <tr><th>Articolo</th><th>Q.ta</th><th>Azioni</th></tr>
+            <tr><th>Articolo</th><th>Pos.</th><th>Q.ta</th><th>Azioni</th></tr>
           </thead>
           <tbody id="slotItemsBody"></tbody>
         </table>
@@ -315,7 +319,7 @@ function openSlotModal(col, row){
   document.getElementById('slotEmptyMsg').classList.add('d-none');
 
   const tbody = document.getElementById('slotItemsBody');
-  tbody.innerHTML = '<tr><td colspan="3"><small class="text-muted">Caricamento...</small></td></tr>';
+  tbody.innerHTML = '<tr><td colspan="4"><small class="text-muted">Caricamento...</small></td></tr>';
 
   fetch(`{{ url_for("slot_items") }}?cabinet_id=${encodeURIComponent(cabId)}&col_code=${encodeURIComponent(col)}&row_num=${encodeURIComponent(row)}`)
     .then(r => r.json())
@@ -337,6 +341,9 @@ function openSlotModal(col, row){
         const tdName = document.createElement('td');
         tdName.innerHTML = `<span class="badge-color" style="background:${it.color};"></span> ${it.name}`;
 
+        const tdPos = document.createElement('td');
+        tdPos.textContent = it.position || '';
+
         const tdQty = document.createElement('td');
         tdQty.textContent = (it.quantity !== null && it.quantity !== undefined) ? it.quantity : '';
 
@@ -348,6 +355,7 @@ function openSlotModal(col, row){
         `;
 
         tr.appendChild(tdName);
+        tr.appendChild(tdPos);
         tr.appendChild(tdQty);
         tr.appendChild(tdActions);
         tbody.appendChild(tr);

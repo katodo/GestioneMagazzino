@@ -103,28 +103,32 @@
         <th class="rowhdr">{{ r }}</th>
         {% for col in grid.cols %}
           {% set key = col ~ '-' ~ r %}
-          {% set cell = grid.cells.get(key) %}
-          {% if not cell %}
-            <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="">
-              <div class="cell-inner" style="color:#777; text-shadow:none; font-weight:500;">&nbsp;</div>
-            </td>
+          {% if grid.merge_skips and grid.merge_skips.get(key) %}
           {% else %}
-            {% if cell.blocked %}
-              <td class="cell-blocked" data-col="{{ col }}" data-row="{{ r }}" data-cat="blocked">
-                <div class="cell-inner">&nbsp;</div>
+            {% set cell = grid.cells.get(key) %}
+            {% set merge = grid.merge_anchors.get(key) if grid.merge_anchors else None %}
+            {% if not cell %}
+              <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="">
+                <div class="cell-inner" style="color:#777; text-shadow:none; font-weight:500;">&nbsp;</div>
               </td>
             {% else %}
-              {% set bg = cell.entries[0].color if cell.entries else '#6c757d' %}
-              <td class="cell-used" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" style="background:{{ bg }}">
-                <div class="cell-inner">
-                  {% for e in cell.entries[:2] %}
-                    <div>{{ e.text }}</div>
-                  {% endfor %}
-                  {% if cell.entries|length > 2 %}
-                    <div>+{{ cell.entries|length-2 }}</div>
-                  {% endif %}
-                </div>
-              </td>
+              {% if cell.blocked %}
+                <td class="cell-blocked" data-col="{{ col }}" data-row="{{ r }}" data-cat="blocked" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
+                  <div class="cell-inner">&nbsp;</div>
+                </td>
+              {% else %}
+                {% set bg = cell.entries[0].color if cell.entries else '#6c757d' %}
+                <td class="cell-used" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" style="background:{{ bg }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
+                  <div class="cell-inner">
+                    {% for e in cell.entries[:2] %}
+                      <div>{{ e.text }}</div>
+                    {% endfor %}
+                    {% if cell.entries|length > 2 %}
+                      <div>+{{ cell.entries|length-2 }}</div>
+                    {% endif %}
+                  </div>
+                </td>
+              {% endif %}
             {% endif %}
           {% endif %}
         {% endfor %}

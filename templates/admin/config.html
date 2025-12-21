@@ -251,6 +251,46 @@
 
   <div class="col-12">
     <div class="form-section">
+      <h5>Fusione cassetti</h5>
+      <form method="post" action="{{ url_for('add_drawer_merge') }}" class="row g-2 mb-2">
+        <div class="col-md-4">
+          <select class="form-select" name="cabinet_id" required>
+            {% for c,l in cabinets %}
+              <option value="{{ c.id }}">{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2"><input class="form-control" name="col_start" placeholder="Col. da (es. A)" required></div>
+        <div class="col-md-2"><input type="number" min="1" max="128" class="form-control" name="row_start" placeholder="Riga da" required></div>
+        <div class="col-md-2"><input class="form-control" name="col_end" placeholder="Col. a (es. C)" required></div>
+        <div class="col-md-2"><input type="number" min="1" max="128" class="form-control" name="row_end" placeholder="Riga a" required></div>
+        <div class="col-md-12 text-end"><button class="btn btn-primary">Aggiungi fusione</button></div>
+      </form>
+      <div class="form-text mb-2">Le celle adiacenti selezionate saranno visualizzate come un unico cassetto.</div>
+      <table class="table table-striped">
+        <thead><tr><th>Cassettiera</th><th>Da</th><th>A</th><th>Azione</th></tr></thead>
+        <tbody>
+          {% for m,c in drawer_merges %}
+          <tr>
+            <td>{{ c.name }}</td>
+            <td>{{ m.col_start }}{{ m.row_start }}</td>
+            <td>{{ m.col_end }}{{ m.row_end }}</td>
+            <td>
+              <form method="post" action="{{ url_for('delete_drawer_merge', merge_id=m.id) }}">
+                <button class="btn btn-sm btn-outline-danger" onclick="return confirm('Eliminare fusione?')">Elimina</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" class="text-muted">Nessuna fusione configurata.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="form-section">
       <h5>Sposta / Scambia cassetti</h5>
       <form method="post" action="{{ url_for('move_slot') }}" class="row g-2">
         <div class="col-md-3">
