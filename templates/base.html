@@ -51,23 +51,31 @@
       text-shadow: 0 1px 1px rgba(0,0,0,.35);
     }
     .legend span { display:inline-block; width:12px; height:12px; margin-right:6px; border-radius:2px; }
+    .action-bar { background: #fff; border-radius: 12px; padding: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .kpi-card { background: #fff; border-radius: 12px; padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .kpi-label { font-size: 12px; color: #6c757d; text-transform: uppercase; letter-spacing: .04em; }
+    .kpi-value { font-size: 22px; font-weight: 700; margin-bottom: 0; }
+    .table-sticky thead th { position: sticky; top: 0; z-index: 2; background: #f8f9fa; }
+    .badge-stock { font-size: 11px; letter-spacing: .02em; }
+    .navbar .nav-link.active, .navbar .btn.active { box-shadow: inset 0 -2px 0 rgba(255,255,255,.6); }
+    .toast-container { z-index: 1080; }
   </style>
 </head>
 <body>
   <nav class="navbar navbar-dark bg-dark">
     <div class="container-fluid">
       <a class="navbar-brand" href="/">Magazzino</a>
-      <div class="d-flex gap-2">
+      <div class="d-flex flex-wrap gap-2">
         {% if current_user.is_authenticated %}
-          <a href="{{ url_for('index') }}" class="btn btn-outline-light btn-sm">Magazzino principale</a>
-          <a href="{{ url_for('admin_items') }}" class="btn btn-outline-light btn-sm">Articoli</a>
-          <a href="{{ url_for('to_place') }}" class="btn btn-outline-light btn-sm">Da posizionare</a>
-          <a href="{{ url_for('auto_assign') }}" class="btn btn-outline-light btn-sm">Assegnamento</a>
-          <a href="{{ url_for('admin_categories') }}" class="btn btn-outline-light btn-sm">Categorie</a>
-          <a href="{{ url_for('admin_config') }}" class="btn btn-outline-light btn-sm">Configurazione</a>
+          <a href="{{ url_for('index') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint == 'index' else '' }}">Magazzino principale</a>
+          <a href="{{ url_for('admin_items') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint == 'admin_items' else '' }}">Articoli</a>
+          <a href="{{ url_for('to_place') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint == 'to_place' else '' }}">Da posizionare</a>
+          <a href="{{ url_for('auto_assign') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint == 'auto_assign' else '' }}">Assegnamento</a>
+          <a href="{{ url_for('admin_categories') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint == 'admin_categories' else '' }}">Categorie</a>
+          <a href="{{ url_for('admin_config') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint == 'admin_config' else '' }}">Configurazione</a>
           <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Logout</a>
         {% else %}
-          <a href="{{ url_for('login') }}" class="btn btn-outline-light btn-sm">Login</a>
+          <a href="{{ url_for('login') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint == 'login' else '' }}">Login</a>
         {% endif %}
       </div>
     </div>
@@ -75,9 +83,15 @@
   <div class="container py-3">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
-        <div class="mb-2">
+        <div class="toast-container position-fixed top-0 end-0 p-3">
           {% for cat, msg in messages %}
-            <div class="alert alert-{{ cat }} py-2 mb-1">{{ msg }}</div>
+          {% set toast_bg = 'bg-success' if cat == 'success' else ('bg-warning' if cat == 'warning' else ('bg-danger' if cat == 'danger' else 'bg-info')) %}
+          <div class="toast align-items-center text-white {{ toast_bg }} border-0 mb-2" role="alert" aria-live="assertive" aria-atomic="true" data-bs-delay="3500">
+            <div class="d-flex">
+              <div class="toast-body">{{ msg }}</div>
+              <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Chiudi"></button>
+            </div>
+          </div>
           {% endfor %}
         </div>
       {% endif %}
@@ -87,5 +101,20 @@
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.querySelectorAll('.toast').forEach(t => new bootstrap.Toast(t).show());
+      const forms = document.querySelectorAll('.needs-validation');
+      forms.forEach(form => {
+        form.addEventListener('submit', (event) => {
+          if (!form.checkValidity()) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+          form.classList.add('was-validated');
+        }, false);
+      });
+    });
+  </script>
 </body>
 </html>

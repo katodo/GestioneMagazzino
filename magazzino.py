@@ -2,7 +2,7 @@
 from flask import Flask, render_template, redirect, url_for, request, jsonify, flash, send_file
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-from sqlalchemy import func, select
+from sqlalchemy import func, select, or_
 import os, io, sqlite3
 
 # ===================== DEFAULT ETICHETTE =====================
@@ -400,10 +400,25 @@ def logout():
 # ===================== PUBLIC =====================
 @app.route("/")
 def index():
+    low_stock_threshold = 5
     q = Item.query
     if request.args.get("category_id"): q = q.filter(Item.category_id == request.args.get("category_id"))
     if request.args.get("material_id"): q = q.filter(Item.material_id == request.args.get("material_id"))
     if request.args.get("measure"):      q = q.filter(func.lower(Item.thread_size).contains(request.args.get("measure").lower()))
+    if request.args.get("q"):
+        term = request.args.get("q").lower()
+        q = q.filter(or_(
+            func.lower(Item.name).contains(term),
+            func.lower(Item.description).contains(term),
+            func.lower(Item.thread_size).contains(term),
+        ))
+    stock = request.args.get("stock")
+    if stock == "available":
+        q = q.filter(Item.quantity > 0)
+    elif stock == "low":
+        q = q.filter(Item.quantity <= low_stock_threshold)
+    elif stock == "out":
+        q = q.filter(Item.quantity <= 0)
     items = q.all()
 
     categories = Category.query.order_by(Category.name).all()
@@ -429,10 +444,17 @@ def index():
         for it in unplaced
     ]
 
+    total_items = Item.query.count()
+    total_categories = Category.query.count()
+    low_stock_count = Item.query.filter(Item.quantity <= low_stock_threshold).count()
+
     return render_template("index.html",
         items=items, categories=categories, materials=materials, pos_by_item=pos_by_item,
         cabinets=all_cabinets, selected_cab_id=cab_id, grid=grid,
-        unplaced_json=unplaced_json, is_admin=current_user.is_authenticated
+        unplaced_json=unplaced_json, is_admin=current_user.is_authenticated,
+        total_items=total_items, total_categories=total_categories,
+        low_stock_count=low_stock_count, unplaced_count=len(unplaced),
+        low_stock_threshold=low_stock_threshold
     )
 
 def build_full_grid(cabinet_id:int):
@@ -599,6 +621,13 @@ def admin_items():
     serialized_custom_fields = serialize_custom_fields(custom_fields)
     category_fields = build_category_field_map(categories)
 
+    subq = select(Assignment.item_id)
+    unplaced_count = Item.query.filter(Item.id.not_in(subq)).count()
+    low_stock_threshold = 5
+    low_stock_count = Item.query.filter(Item.quantity <= low_stock_threshold).count()
+    total_items = Item.query.count()
+    total_categories = Category.query.count()
+
     return render_template("admin/dashboard.html",
         items=items, categories=categories, materials=materials, finishes=finishes,
         locations=locations, cabinets=cabinets,
@@ -609,7 +638,12 @@ def admin_items():
         drive_options=drive_options, standoff_cfgs=standoff_cfgs,
         pos_by_item=pos_by_item,
         custom_fields=serialized_custom_fields,
-        category_fields=category_fields
+        category_fields=category_fields,
+        unplaced_count=unplaced_count,
+        low_stock_count=low_stock_count,
+        total_items=total_items,
+        total_categories=total_categories,
+        low_stock_threshold=low_stock_threshold
     )
 
 

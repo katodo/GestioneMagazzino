@@ -1,10 +1,53 @@
 {% extends "base.html" %}
 {% block content %}
-<h3>Articoli (Admin)</h3>
+<div class="row g-3 mb-3">
+  <div class="col-lg-3 col-md-6">
+    <div class="kpi-card h-100">
+      <div class="kpi-label">Articoli totali</div>
+      <p class="kpi-value">{{ total_items }}</p>
+      <div class="text-muted small">Inventario completo</div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="kpi-card h-100">
+      <div class="kpi-label">Categorie</div>
+      <p class="kpi-value">{{ total_categories }}</p>
+      <div class="text-muted small">Organizzazione</div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="kpi-card h-100">
+      <div class="kpi-label">Scorte basse</div>
+      <p class="kpi-value">{{ low_stock_count }}</p>
+      <div class="text-muted small">≤ {{ low_stock_threshold }} pezzi</div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="kpi-card h-100">
+      <div class="kpi-label">Da posizionare</div>
+      <p class="kpi-value">{{ unplaced_count }}</p>
+      <div class="text-muted small">In attesa di posizione</div>
+    </div>
+  </div>
+</div>
+
+<div class="action-bar mb-3">
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+    <div>
+      <h3 class="mb-1">Articoli (Admin)</h3>
+      <div class="text-muted small">Gestisci catalogo e stampa etichette in modo rapido.</div>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      <a href="{{ url_for('to_place') }}" class="btn btn-outline-primary btn-sm">Da posizionare</a>
+      <a href="{{ url_for('auto_assign') }}" class="btn btn-outline-secondary btn-sm">Assegnamento automatico</a>
+      <a href="#admItemsTable" class="btn btn-primary btn-sm">Vai alla tabella</a>
+    </div>
+  </div>
+</div>
 
 <div class="form-section mb-3">
   <h5 class="mb-2">Nuovo articolo</h5>
-  <form method="post" action="{{ url_for('add_item') }}">
+  <form method="post" action="{{ url_for('add_item') }}" class="needs-validation" novalidate>
     <div class="row g-2">
       <div class="col-md-6 field-block" data-field-key="category_id">
         <label class="form-label">Categoria</label>
@@ -14,6 +57,7 @@
             <option value="{{ c.id }}">{{ c.name }}</option>
           {% endfor %}
         </select>
+        <div class="invalid-feedback">Seleziona una categoria.</div>
       </div>
       <div class="col-md-6 field-block" data-field-key="subtype_id">
         <label class="form-label">Sottotipo (forma)</label>
@@ -173,45 +217,56 @@
         <button class="btn btn-sm btn-primary">Stampa etichette</button>
       </div>
     </div>
-    <table class="table table-striped table-hover" id="admItemsTable">
-      <thead>
-        <tr>
-          <th style="width:36px;"><input type="checkbox" id="chkAll"></th>
-          <th>ID</th>
-          <th>Categoria</th>
-          <th>Nome</th>
-          <th>Misura</th>
-          <th>Dim. princ. (mm)</th>
-          <th>Spessore (mm)</th>
-          <th>Materiale</th>
-          <th>Q.ta</th>
-          <th>Posizione</th>
-          <th>Azione</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for it in items %}
-        <tr>
-          <td><input type="checkbox" name="item_ids" value="{{ it.id }}"></td>
-          <td>{{ it.id }}</td>
-          <td>{% if it.category %}<span class="badge-color" style="background:{{ it.category.color }}"></span>{{ it.category.name }}{% endif %}</td>
-          <td>{{ compose_caption(it) }}</td>
-          <td>{{ it.thread_size or "" }}</td>
-          <td>{{ '%.2f'|format(it.main_size_mm) if it.main_size_mm is not none else '' }}</td>
-          <td>{{ '%.2f'|format(it.thickness_mm) if it.thickness_mm is not none else '' }}</td>
-          <td>{{ it.material.name if it.material else '' }}</td>
-          <td>{{ it.quantity }}</td>
-          <td>{{ pos_by_item.get(it.id, '') }}</td>
-          <td class="text-nowrap">
-            <a href="{{ url_for('edit_item', item_id=it.id) }}" class="btn btn-sm btn-outline-primary">Modifica</a>
-            <form method="post" action="{{ url_for('delete_item', item_id=it.id) }}" class="d-inline" onsubmit="return confirm('Eliminare articolo?')">
-              <button class="btn btn-sm btn-outline-danger">Elimina</button>
-            </form>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="table-responsive table-sticky">
+      <table class="table table-striped table-hover align-middle mb-0" id="admItemsTable">
+        <thead>
+          <tr>
+            <th style="width:36px;"><input type="checkbox" id="chkAll"></th>
+            <th>ID</th>
+            <th>Categoria</th>
+            <th>Nome</th>
+            <th>Misura</th>
+            <th>Dim. princ. (mm)</th>
+            <th>Spessore (mm)</th>
+            <th>Materiale</th>
+            <th>Q.ta</th>
+            <th>Posizione</th>
+            <th>Azione</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for it in items %}
+          <tr>
+            <td><input type="checkbox" name="item_ids" value="{{ it.id }}"></td>
+            <td>{{ it.id }}</td>
+            <td>{% if it.category %}<span class="badge-color" style="background:{{ it.category.color }}"></span>{{ it.category.name }}{% endif %}</td>
+            <td>{{ compose_caption(it) }}</td>
+            <td>{{ it.thread_size or "" }}</td>
+            <td>{{ '%.2f'|format(it.main_size_mm) if it.main_size_mm is not none else '' }}</td>
+            <td>{{ '%.2f'|format(it.thickness_mm) if it.thickness_mm is not none else '' }}</td>
+            <td>{{ it.material.name if it.material else '' }}</td>
+            <td>
+              {% if it.quantity <= 0 %}
+                <span class="badge bg-danger badge-stock">Esaurito</span>
+              {% elif it.quantity <= low_stock_threshold %}
+                <span class="badge bg-warning text-dark badge-stock">Scorte basse</span>
+              {% else %}
+                <span class="badge bg-success badge-stock">Disponibile</span>
+              {% endif %}
+              <span class="ms-2 fw-semibold">{{ it.quantity }}</span>
+            </td>
+            <td>{{ pos_by_item.get(it.id, '') }}</td>
+            <td class="text-nowrap">
+              <a href="{{ url_for('edit_item', item_id=it.id) }}" class="btn btn-sm btn-outline-primary">Modifica</a>
+              <form method="post" action="{{ url_for('delete_item', item_id=it.id) }}" class="d-inline" onsubmit="return confirm('Eliminare articolo?')">
+                <button class="btn btn-sm btn-outline-danger">Elimina</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </form>
 </div>
 
@@ -260,7 +315,14 @@ function switchDatalist(stdSelId, inputId){
 }
 
 document.addEventListener('DOMContentLoaded', ()=>{
-  if ($.fn.DataTable) $('#admItemsTable').DataTable({pageLength:25, order:[[1,'asc']]});
+  if ($.fn.DataTable) {
+    $('#admItemsTable').DataTable({
+      pageLength:25,
+      lengthMenu:[10, 25, 50, 100],
+      order:[[1,'asc']],
+      language: { search: "Cerca nella tabella:" }
+    });
+  }
   document.getElementById('chkAll')?.addEventListener('change', (e)=>{
     document.querySelectorAll('input[name="item_ids"]').forEach(cb=> cb.checked = e.target.checked);
   });

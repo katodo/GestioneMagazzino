@@ -1,8 +1,58 @@
 {% extends "base.html" %}
 {% block content %}
-<h3>Elenco articoli</h3>
-<form class="row g-2 mb-3">
-  <div class="col-md-3">
+<div class="row g-3 mb-3">
+  <div class="col-lg-3 col-md-6">
+    <div class="kpi-card h-100">
+      <div class="kpi-label">Articoli totali</div>
+      <p class="kpi-value">{{ total_items }}</p>
+      <div class="text-muted small">In archivio</div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="kpi-card h-100">
+      <div class="kpi-label">Categorie attive</div>
+      <p class="kpi-value">{{ total_categories }}</p>
+      <div class="text-muted small">Catalogazione</div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="kpi-card h-100">
+      <div class="kpi-label">Scorte basse</div>
+      <p class="kpi-value">{{ low_stock_count }}</p>
+      <div class="text-muted small">≤ {{ low_stock_threshold }} pezzi</div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="kpi-card h-100">
+      <div class="kpi-label">Da posizionare</div>
+      <p class="kpi-value">{{ unplaced_count }}</p>
+      <div class="text-muted small">Senza posizione</div>
+    </div>
+  </div>
+</div>
+
+<div class="action-bar mb-3">
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+    <div>
+      <h3 class="mb-1">Elenco articoli</h3>
+      <div class="text-muted small">Ricerca rapida e filtri intelligenti per trovare subito ciò che ti serve.</div>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      {% if is_admin %}
+        <a href="{{ url_for('admin_items') }}" class="btn btn-primary btn-sm">Nuovo articolo</a>
+        <a href="{{ url_for('to_place') }}" class="btn btn-outline-primary btn-sm">Da posizionare</a>
+        <a href="{{ url_for('auto_assign') }}" class="btn btn-outline-secondary btn-sm">Assegna automaticamente</a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<form class="row g-2 mb-3 align-items-end">
+  <div class="col-md-4">
+    <label class="form-label small text-muted mb-1">Ricerca globale</label>
+    <input type="text" name="q" class="form-control" placeholder="Cerca per nome, descrizione o misura" value="{{ request.args.get('q','') }}">
+  </div>
+  <div class="col-md-2">
     <select name="category_id" class="form-select">
       <option value="">Tutte le categorie</option>
       {% for c in categories %}
@@ -10,7 +60,7 @@
       {% endfor %}
     </select>
   </div>
-  <div class="col-md-3">
+  <div class="col-md-2">
     <select name="material_id" class="form-select">
       <option value="">Tutti i materiali</option>
       {% for m in materials %}
@@ -18,32 +68,72 @@
       {% endfor %}
     </select>
   </div>
-  <div class="col-md-3"><input type="text" name="measure" class="form-control" placeholder="Cerca misura (es. M3, 1/4-20)" value="{{ request.args.get('measure','') }}"></div>
-  <div class="col-md-3"><button class="btn btn-primary btn-sm">Filtra</button> <a href="{{ url_for('index') }}" class="btn btn-secondary btn-sm">Reset</a></div>
+  <div class="col-md-2">
+    <input type="text" name="measure" class="form-control" placeholder="Misura (es. M3)" value="{{ request.args.get('measure','') }}">
+  </div>
+  <div class="col-md-2">
+    <select name="stock" class="form-select">
+      <option value="">Disponibilità</option>
+      <option value="available" {{ 'selected' if request.args.get('stock') == 'available' else '' }}>Disponibili</option>
+      <option value="low" {{ 'selected' if request.args.get('stock') == 'low' else '' }}>Scorte basse</option>
+      <option value="out" {{ 'selected' if request.args.get('stock') == 'out' else '' }}>Esauriti</option>
+    </select>
+  </div>
+  <div class="col-md-12 d-flex flex-wrap gap-2 mt-1">
+    <button class="btn btn-primary btn-sm">Filtra</button>
+    <a href="{{ url_for('index') }}" class="btn btn-secondary btn-sm">Reset</a>
+    <div class="d-flex flex-wrap gap-1">
+      <a class="btn btn-outline-dark btn-sm {{ 'active' if request.args.get('stock') == 'available' else '' }}" href="{{ url_for('index', stock='available', q=request.args.get('q'), category_id=request.args.get('category_id'), material_id=request.args.get('material_id'), measure=request.args.get('measure')) }}">Disponibili</a>
+      <a class="btn btn-outline-warning btn-sm {{ 'active' if request.args.get('stock') == 'low' else '' }}" href="{{ url_for('index', stock='low', q=request.args.get('q'), category_id=request.args.get('category_id'), material_id=request.args.get('material_id'), measure=request.args.get('measure')) }}">Scorte basse</a>
+      <a class="btn btn-outline-danger btn-sm {{ 'active' if request.args.get('stock') == 'out' else '' }}" href="{{ url_for('index', stock='out', q=request.args.get('q'), category_id=request.args.get('category_id'), material_id=request.args.get('material_id'), measure=request.args.get('measure')) }}">Esauriti</a>
+    </div>
+  </div>
 </form>
 
-<table class="table table-striped table-hover" id="itemsTable">
-  <thead><tr>
-    <th>ID</th><th>Categoria</th><th>Descrizione</th><th>Misura</th>
-    <th>Dim. principale (mm)</th><th>Spessore (mm)</th><th>Materiale</th><th>Quantità</th><th>Posizione</th>
-  </tr></thead>
-  <tbody>
-    {% for item in items %}
-    <tr>
-      <td>{{ item.id }}</td>
-      <td>{% if item.category %}<span class="badge-color" style="background:{{ item.category.color }}"></span>{{ item.category.name }}{% endif %}</td>
-      <td>{{ compose_caption(item) }}</td>
-      <td>{{ item.thread_size }}</td>
-      <td>{{ '%.2f'|format(item.main_size_mm) if item.main_size_mm is not none else '' }}</td>
-      <td>{{ '%.2f'|format(item.thickness_mm) if item.thickness_mm is not none else '' }}</td>
-      <td>{{ item.material.name if item.material else '' }}</td>
-      <td>{{ item.quantity }}</td>
-      <td>{{ pos_by_item.get(item.id, '') }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-<script>$(function(){ if ($.fn.DataTable) $('#itemsTable').DataTable({ pageLength: 25, order:[[1,'asc']] });});</script>
+<div class="table-responsive table-sticky">
+  <table class="table table-striped table-hover align-middle mb-0" id="itemsTable">
+    <thead><tr>
+      <th>ID</th><th>Categoria</th><th>Descrizione</th><th>Misura</th>
+      <th>Dim. principale (mm)</th><th>Spessore (mm)</th><th>Materiale</th><th>Quantità</th><th>Posizione</th>
+    </tr></thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td>{{ item.id }}</td>
+        <td>{% if item.category %}<span class="badge-color" style="background:{{ item.category.color }}"></span>{{ item.category.name }}{% endif %}</td>
+        <td>{{ compose_caption(item) }}</td>
+        <td>{{ item.thread_size }}</td>
+        <td>{{ '%.2f'|format(item.main_size_mm) if item.main_size_mm is not none else '' }}</td>
+        <td>{{ '%.2f'|format(item.thickness_mm) if item.thickness_mm is not none else '' }}</td>
+        <td>{{ item.material.name if item.material else '' }}</td>
+        <td>
+          {% if item.quantity <= 0 %}
+            <span class="badge bg-danger badge-stock">Esaurito</span>
+          {% elif item.quantity <= low_stock_threshold %}
+            <span class="badge bg-warning text-dark badge-stock">Scorte basse</span>
+          {% else %}
+            <span class="badge bg-success badge-stock">Disponibile</span>
+          {% endif %}
+          <span class="ms-2 fw-semibold">{{ item.quantity }}</span>
+        </td>
+        <td>{{ pos_by_item.get(item.id, '') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<script>
+  $(function(){
+    if ($.fn.DataTable) {
+      $('#itemsTable').DataTable({
+        pageLength: 25,
+        lengthMenu: [10, 25, 50, 100],
+        order:[[1,'asc']],
+        language: { search: "Cerca nella tabella:" }
+      });
+    }
+  });
+</script>
 
 <hr class="my-4">
 
@@ -307,6 +397,16 @@ function openSlotModal(col, row){
 document.addEventListener('DOMContentLoaded', function(){
   const grid = document.getElementById('grid');
   if (!grid) return;
+
+  const assignModalEl = document.getElementById('assignModal');
+  assignModalEl?.addEventListener('shown.bs.modal', () => {
+    document.getElementById('flt')?.focus();
+  });
+
+  const slotModalEl = document.getElementById('slotModal');
+  slotModalEl?.addEventListener('shown.bs.modal', () => {
+    document.getElementById('slotItemsTable')?.scrollIntoView({ block: 'nearest' });
+  });
 
   // Click su cella:
   //  - cella bloccata → avviso
