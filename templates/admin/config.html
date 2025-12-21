@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>Configurazione</h3>
+<div class="row">
+  <div class="col-lg-4">
+    <div class="form-section mb-3">
+      <h5>Stampa etichette & QR</h5>
+      <form method="post" action="{{ url_for('update_settings') }}" class="row g-2">
+        <div class="col-6"><label class="form-label">Larghezza (mm)</label><input type="number" step="0.1" class="form-control" name="label_w_mm" value="{{ settings.label_w_mm }}"></div>
+        <div class="col-6"><label class="form-label">Altezza (mm)</label><input type="number" step="0.1" class="form-control" name="label_h_mm" value="{{ settings.label_h_mm }}"></div>
+        <div class="col-6"><label class="form-label">Margini top/bottom (mm)</label><input type="number" step="0.1" class="form-control" name="margin_tb_mm" value="{{ settings.margin_tb_mm }}"></div>
+        <div class="col-6"><label class="form-label">Margini sx/dx (mm)</label><input type="number" step="0.1" class="form-control" name="margin_lr_mm" value="{{ settings.margin_lr_mm }}"></div>
+        <div class="col-6"><label class="form-label">Spazio tra etichette (mm)</label><input type="number" step="0.1" class="form-control" name="gap_mm" value="{{ settings.gap_mm }}"></div>
+        <div class="col-6">
+          <label class="form-label">Orientamento</label>
+          <select class="form-select" name="orientation_landscape">
+            <option value="1" {{ 'selected' if settings.orientation_landscape else '' }}>Orizzontale</option>
+            <option value=""  {{ '' if settings.orientation_landscape else 'selected' }}>Verticale</option>
+          </select>
+        </div>
+        <div class="col-6">
+          <label class="form-label">QR attivo di default</label>
+          <select class="form-select" name="qr_default">
+            <option value="1" {{ 'selected' if settings.qr_default else '' }}>Sì</option>
+            <option value="">No</option>
+          </select>
+        </div>
+        <div class="col-12">
+          <label class="form-label">QR Base URL (opz.)</label>
+          <input class="form-control" name="qr_base_url" placeholder="https://magazzino.local" value="{{ settings.qr_base_url or '' }}">
+          <small class="text-muted">Se vuoto, uso l'host corrente.</small>
+        </div>
+        <div class="col-12 text-end mt-2"><button class="btn btn-primary">Salva impostazioni</button></div>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-lg-8">
+    <div class="form-section mb-3">
+      <h5>Ubicazioni</h5>
+      <form method="post" action="{{ url_for('add_location') }}" class="row g-2 mb-2">
+        <div class="col-md-9"><input class="form-control" name="name" placeholder="Nome ubicazione"></div>
+        <div class="col-md-3"><button class="btn btn-primary w-100">Aggiungi</button></div>
+      </form>
+      <table class="table table-sm table-striped">
+        <thead><tr><th>ID</th><th>Nome</th><th>Azione</th></tr></thead>
+        <tbody>
+          {% for l in locations %}
+          <tr>
+            <td>{{ l.id }}</td>
+            <td>
+              <form method="post" action="{{ url_for('update_location', loc_id=l.id) }}" class="row g-2">
+                <div class="col-md-9"><input class="form-control" name="name" value="{{ l.name }}"></div>
+                <div class="col-md-3">
+                  <button class="btn btn-sm btn-primary">Salva</button>
+                  <button formaction="{{ url_for('delete_location', loc_id=l.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger" onclick="return confirm('Eliminare ubicazione?')">Elimina</button>
+                </div>
+              </form>
+            </td>
+            <td></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="form-section">
+      <h5>Cassettiere</h5>
+      <form method="post" action="{{ url_for('add_cabinet') }}" class="row g-2 mb-2">
+        <div class="col-md-4">
+          <select class="form-select" name="location_id" required>
+            {% for l in locations %}
+              <option value="{{ l.id }}">{{ l.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-4"><input class="form-control" name="name" placeholder="Nome cassettiera"></div>
+        <div class="col-md-2"><input type="number" min="1" max="128" class="form-control" name="rows_max" value="128"></div>
+        <div class="col-md-1"><input class="form-control" name="cols_max" placeholder="ZZ" value="ZZ" maxlength="2"></div>
+        <div class="col-md-1"><input type="number" min="1" class="form-control" name="compartments_per_slot" value="6"></div>
+        <div class="col-md-12 text-end"><button class="btn btn-primary">Aggiungi</button></div>
+      </form>
+
+      <table class="table table-striped">
+        <thead><tr><th>ID</th><th>Ubicazione</th><th>Nome</th><th>Righe</th><th>Colonne</th><th>Comp.</th><th>Azione</th></tr></thead>
+        <tbody>
+          {% for c,l in cabinets %}
+          <tr>
+            <td>{{ c.id }}</td>
+            <td>{{ l.name }}</td>
+            <td colspan="5">
+              <form method="post" action="{{ url_for('update_cabinet', cab_id=c.id) }}" class="row g-2">
+                <div class="col-md-4"><input class="form-control" name="name" value="{{ c.name }}"></div>
+                <div class="col-md-2"><input type="number" min="1" max="128" class="form-control" name="rows_max" value="{{ c.rows_max }}"></div>
+                <div class="col-md-2"><input class="form-control" name="cols_max" value="{{ c.cols_max }}" maxlength="2"></div>
+                <div class="col-md-2"><input type="number" min="1" class="form-control" name="compartments_per_slot" value="{{ c.compartments_per_slot }}"></div>
+                <div class="col-md-2">
+                  <button class="btn btn-sm btn-primary w-100">Salva</button>
+                  <button formaction="{{ url_for('delete_cabinet', cab_id=c.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger w-100 mt-1" onclick="return confirm('Eliminare cassettiera?')">Elimina</button>
+                </div>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <hr>
+      <h5>Sposta / Scambia cassetti</h5>
+      <form method="post" action="{{ url_for('move_slot') }}" class="row g-2">
+        <div class="col-md-3">
+          <label class="form-label">Origine</label>
+          <select class="form-select" name="cabinet_from">
+            {% for c,l in cabinets %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2"><label class="form-label">Col</label><input class="form-control" name="col_from"></div>
+        <div class="col-md-2"><label class="form-label">Riga</label><input type="number" class="form-control" name="row_from"></div>
+
+        <div class="col-md-3">
+          <label class="form-label">Destinazione</label>
+          <select class="form-select" name="cabinet_to">
+            {% for c,l in cabinets %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2"><label class="form-label">Col</label><input class="form-control" name="col_to"></div>
+        <div class="col-md-2"><label class="form-label">Riga</label><input type="number" class="form-control" name="row_to"></div>
+
+        <div class="col-md-2"><label class="form-label"> </label><div class="form-check"><input class="form-check-input" type="checkbox" name="swap" id="swap"> <label class="form-check-label" for="swap">Scambia</label></div></div>
+        <div class="col-md-2 align-self-end"><button class="btn btn-primary w-100">Esegui</button></div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

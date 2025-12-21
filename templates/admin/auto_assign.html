@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>Assegnamento automatico cassettiera</h3>
+
+<div class="form-section mb-3">
+  <form method="post">
+    <div class="row g-2">
+      <div class="col-md-3">
+        <label class="form-label">Cassettiera</label>
+        <select name="cabinet_id" class="form-select" required>
+          {% for c in cabinets %}
+            <option value="{{ c.id }}" {{ 'selected' if c.id == form_cabinet_id else '' }}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Categoria</label>
+        <select name="category_id" class="form-select" required>
+          {% for c in categories %}
+            <option value="{{ c.id }}" {{ 'selected' if c.id == form_category_id else '' }}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+        {% if unplaced_count is not none %}
+          <div class="form-text">Articoli non posizionati: {{ unplaced_count }}</div>
+        {% endif %}
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Chiave primaria</label>
+        <select name="primary_key" class="form-select">
+          {% for v, label in sort_options %}
+            <option value="{{ v }}" {{ 'selected' if v == primary_key else '' }}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Chiave secondaria</label>
+        <select name="secondary_key" class="form-select">
+          <option value="">(nessuna)</option>
+          {% for v, label in sort_options %}
+            <option value="{{ v }}" {{ 'selected' if v == secondary_key else '' }}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Numero di articoli</label>
+        <input type="number" min="1" class="form-control" name="count" value="{{ count or 10 }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Direzione</label>
+        <select name="direction" class="form-select">
+          <option value="H" {{ 'selected' if direction == 'H' else '' }}>Orizzontale</option>
+          <option value="V" {{ 'selected' if direction == 'V' else '' }}>Verticale</option>
+        </select>
+        <div class="form-text">Orizzontale: da sinistra a destra, poi riga successiva. Verticale: dall'alto in basso, poi colonna successiva.</div>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Cella di partenza</label>
+        <div class="input-group">
+          <span class="input-group-text">Col</span>
+          <input type="text" class="form-control" name="start_col" id="start_col" value="{{ start_col or '' }}" maxlength="2" placeholder="es. A">
+          <span class="input-group-text">Riga</span>
+          <input type="number" class="form-control" name="start_row" id="start_row" value="{{ start_row or '' }}" min="1" max="128">
+        </div>
+        <div class="form-text">Puoi anche cliccare una cella nella griglia qui sotto.</div>
+      </div>
+      <div class="col-md-3 d-flex align-items-end">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" value="1" id="clear_occupied" name="clear_occupied" {{ 'checked' if clear_occupied else '' }}>
+          <label class="form-check-label" for="clear_occupied">
+            De-alloca celle già popolate nel percorso
+          </label>
+        </div>
+      </div>
+      <div class="col-12 text-end">
+        <button class="btn btn-primary">Assegna automaticamente</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<h4>Griglia cassettiera</h4>
+<div class="legend mb-2">
+  <span style="background:black"></span> Bloccata
+  {% for c in categories %}
+    <span style="background:{{ c.color }}; margin-left:12px;"></span> {{ c.name }}
+  {% endfor %}
+</div>
+
+<div class="grid-wrap p-2">
+  {% if grid.rows and grid.cols %}
+  <table class="grid-table table table-sm mb-0" id="autoGrid">
+    <thead>
+      <tr>
+        <th class="rowhdr"></th>
+        {% for col in grid.cols %}
+          <th>{{ col }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in grid.rows %}
+      <tr>
+        <th class="rowhdr">{{ r }}</th>
+        {% for col in grid.cols %}
+          {% set key = col ~ '-' ~ r %}
+          {% set cell = grid.cells.get(key) %}
+          {% if not cell %}
+            <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="">
+              <div class="cell-inner" style="color:#777; text-shadow:none; font-weight:500;">&nbsp;</div>
+            </td>
+          {% else %}
+            {% if cell.blocked %}
+              <td class="cell-blocked" data-col="{{ col }}" data-row="{{ r }}" data-cat="blocked">
+                <div class="cell-inner">&nbsp;</div>
+              </td>
+            {% else %}
+              {% set bg = cell.entries[0].color if cell.entries else '#6c757d' %}
+              <td class="cell-used" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" style="background:{{ bg }}">
+                <div class="cell-inner">
+                  {% for e in cell.entries[:2] %}
+                    <div>{{ e.text }}</div>
+                  {% endfor %}
+                  {% if cell.entries|length > 2 %}
+                    <div>+{{ cell.entries|length-2 }}</div>
+                  {% endif %}
+                </div>
+              </td>
+            {% endif %}
+          {% endif %}
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <div class="text-muted p-3">Nessuna cassettiera selezionata.</div>
+  {% endif %}
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  const grid = document.getElementById('autoGrid');
+  if (!grid) return;
+  grid.addEventListener('click', function(e){
+    const td = e.target.closest('td');
+    if (!td) return;
+    if (td.classList.contains('cell-blocked')) {
+      alert('Cella bloccata, non utilizzabile.');
+      return;
+    }
+    const col = td.dataset.col;
+    const row = td.dataset.row;
+    if (!col || !row) return;
+    document.getElementById('start_col').value = col;
+    document.getElementById('start_row').value = row;
+    grid.querySelectorAll('td').forEach(c => c.classList.remove('table-primary'));
+    td.classList.add('table-primary');
+  });
+});
+</script>
+{% endblock %}

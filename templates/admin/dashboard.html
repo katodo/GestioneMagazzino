@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>Articoli (Admin)</h3>
+
+<div class="form-section mb-3">
+  <form id="labelForm" method="post" action="{{ url_for('labels_pdf') }}">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h5 class="mb-0">Elenco</h5>
+      <div>
+        <button class="btn btn-sm btn-primary">Stampa etichette</button>
+      </div>
+    </div>
+    <table class="table table-striped table-hover" id="admItemsTable">
+      <thead>
+        <tr>
+          <th style="width:36px;"><input type="checkbox" id="chkAll"></th>
+          <th>ID</th>
+          <th>Categoria</th>
+          <th>Nome</th>
+          <th>Misura</th>
+          <th>Dim. princ. (mm)</th>
+          <th>Spessore (mm)</th>
+          <th>Materiale</th>
+          <th>Q.ta</th>
+          <th>Posizione</th>
+          <th>Azione</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for it in items %}
+        <tr>
+          <td><input type="checkbox" name="item_ids" value="{{ it.id }}"></td>
+          <td>{{ it.id }}</td>
+          <td>{% if it.category %}<span class="badge-color" style="background:{{ it.category.color }}"></span>{{ it.category.name }}{% endif %}</td>
+          <td>{{ compose_caption(it) }}</td>
+          <td>{{ it.thread_size or "" }}</td>
+          <td>{{ '%.2f'|format(it.main_size_mm) if it.main_size_mm is not none else '' }}</td>
+          <td>{{ '%.2f'|format(it.thickness_mm) if it.thickness_mm is not none else '' }}</td>
+          <td>{{ it.material.name if it.material else '' }}</td>
+          <td>{{ it.quantity }}</td>
+          <td>{{ pos_by_item.get(it.id, '') }}</td>
+          <td class="text-nowrap">
+            <a href="{{ url_for('edit_item', item_id=it.id) }}" class="btn btn-sm btn-outline-primary">Modifica</a>
+            <form method="post" action="{{ url_for('delete_item', item_id=it.id) }}" class="d-inline" onsubmit="return confirm('Eliminare articolo?')">
+              <button class="btn btn-sm btn-outline-danger">Elimina</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </form>
+</div>
+
+<div class="form-section">
+  <h5 class="mb-2">Nuovo articolo</h5>
+  <form method="post" action="{{ url_for('add_item') }}">
+    <div class="row g-2">
+      <div class="col-md-6">
+        <label class="form-label">Categoria</label>
+        <select class="form-select" name="category_id" id="catSel" required>
+          <option value="">—</option>
+          {% for c in categories %}
+            <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Sottotipo (forma)</label>
+        <select class="form-select" name="subtype_id" id="subtypeSel">
+          <option value="">—</option>
+        </select>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label">Standard</label>
+        <select class="form-select" name="thread_standard" id="stdSel">
+          {% for std in thread_standards %}
+            <option value="{{ std.code }}" {{ 'selected' if std.code == default_standard_code else '' }}>{{ std.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-8">
+        <label class="form-label">Misura (es. M3 / 1/4-20)</label>
+        <input class="form-control" name="thread_size" id="sizeInput" list="sizes-{{ default_standard_code }}">
+        {% for std in thread_standards %}
+          <datalist id="sizes-{{ std.code }}">
+            {% for s in sizes_by_standard.get(std.code, []) %}<option value="{{ s }}">{% endfor %}
+          </datalist>
+        {% endfor %}
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label">Impronta (Viti)</label>
+        <select class="form-select" name="drive" id="driveSel">
+          <option value="">—</option>
+          {% for d in drive_options %}<option value="{{ d.name }}">{{ d.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Configurazione (Torrette)</label>
+        <select class="form-select" name="standoff_config" id="standoffSel">
+          <option value="">—</option>
+          {% for d in standoff_cfgs %}<option value="{{ d.name }}">{{ d.name }}</option>{% endfor %}
+        </select>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label">Dimensione principale (mm)</label>
+        <input type="number" step="0.01" class="form-control" name="main_size_mm" placeholder="L (viti/torrette) o Øe (rondelle)">
+      </div>
+      <div class="col-md-3 dim-washer">
+        <label class="form-label">Ø interno (mm)</label>
+        <input type="number" step="0.01" class="form-control" name="inner_d_mm">
+      </div>
+      <div class="col-md-3 dim-washer">
+        <label class="form-label">Spessore (mm)</label>
+        <input type="number" step="0.01" class="form-control" name="thickness_mm">
+      </div>
+
+      <div class="col-md-6">
+        <label class="form-label">Materiale</label>
+        <select class="form-select" name="material_id">
+          <option value="">—</option>
+          {% for m in materials %}<option value="{{ m.id }}">{{ m.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Finitura</label>
+        <select class="form-select" name="finish_id">
+          <option value="">—</option>
+          {% for f in finishes %}<option value="{{ f.id }}">{{ f.name }}</option>{% endfor %}
+        </select>
+      </div>
+
+      <div class="col-md-12">
+        <label class="form-label">Descrizione (opz.)</label>
+        <input type="text" class="form-control" name="description">
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label">Quantità</label>
+        <input type="number" min="0" step="1" class="form-control" name="quantity" value="0">
+      </div>
+
+      <div class="col-md-8">
+        <label class="form-label d-block">Campi in etichetta</label>
+        <div class="form-check form-check-inline">
+          <input class="form-check-input" type="checkbox" name="label_show_category" checked>
+          <label class="form-check-label">Categoria</label>
+        </div>
+        <div class="form-check form-check-inline">
+          <input class="form-check-input" type="checkbox" name="label_show_subtype" checked>
+          <label class="form-check-label">Sottotipo</label>
+        </div>
+        <div class="form-check form-check-inline">
+          <input class="form-check-input" type="checkbox" name="label_show_measure" checked>
+          <label class="form-check-label">Misura</label>
+        </div>
+        <div class="form-check form-check-inline">
+          <input class="form-check-input" type="checkbox" name="label_show_main" checked>
+          <label class="form-check-label">Dim. principale</label>
+        </div>
+        <div class="form-check form-check-inline">
+          <input class="form-check-input" type="checkbox" name="label_show_material" checked>
+          <label class="form-check-label">Materiale</label>
+        </div>
+      </div>
+
+      <div class="col-12"><hr></div>
+
+      <div class="col-md-4">
+        <label class="form-label">Cassettiera</label>
+        <select class="form-select" name="cabinet_id">
+          <option value="">(assegna dopo)</option>
+          {% for c in cabinets %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Colonna (A..ZZ)</label>
+        <input class="form-control" name="col_code" placeholder="es. D">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Riga (1..128)</label>
+        <input type="number" min="1" max="128" class="form-control" name="row_num">
+      </div>
+
+      <div class="col-12 text-end">
+        <button class="btn btn-primary">Salva</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<script>
+const SUBTYPES = {{ subtypes_by_cat|tojson }};
+const RONDELLE_ID = {{ rondelle_id or 'null' }};
+const VITI_ID = {{ viti_id or 'null' }};
+const TORRETTE_ID = {{ torrette_id or 'null' }};
+
+function populateSubtypes(catId, targetSelId){
+  const sel = document.getElementById(targetSelId);
+  sel.innerHTML = '<option value="">—</option>';
+  if (!catId || !SUBTYPES[catId]) return;
+  SUBTYPES[catId].forEach(s=>{
+    const o = document.createElement('option');
+    o.value = s.id; o.textContent = s.name;
+    sel.appendChild(o);
+  });
+}
+function toggleSpecificFields(){
+  const catId = parseInt(document.getElementById('catSel').value || 0);
+  const isRondelle = (RONDELLE_ID && catId===RONDELLE_ID);
+  const isViti = (VITI_ID && catId===VITI_ID);
+  const isTorrette = (TORRETTE_ID && catId===TORRETTE_ID);
+  document.querySelectorAll('.dim-washer').forEach(el=> el.style.display = isRondelle ? '' : 'none');
+  document.getElementById('driveSel').closest('.col-md-4').style.display = isViti ? '' : 'none';
+  document.getElementById('standoffSel').closest('.col-md-4').style.display = isTorrette ? '' : 'none';
+}
+function switchDatalist(stdSelId, inputId){
+  const std = document.getElementById(stdSelId).value;
+  const inp = document.getElementById(inputId);
+  if (!std) {
+    inp.removeAttribute('list');
+    return;
+  }
+  const listId = `sizes-${std}`;
+  if (document.getElementById(listId)) {
+    inp.setAttribute('list', listId);
+  } else {
+    inp.removeAttribute('list');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', ()=>{
+  if ($.fn.DataTable) $('#admItemsTable').DataTable({pageLength:25, order:[[1,'asc']]});
+  document.getElementById('chkAll')?.addEventListener('change', (e)=>{
+    document.querySelectorAll('input[name="item_ids"]').forEach(cb=> cb.checked = e.target.checked);
+  });
+  toggleSpecificFields();
+  document.getElementById('catSel').addEventListener('change', e=>{
+    populateSubtypes(parseInt(e.target.value||0), 'subtypeSel');
+    toggleSpecificFields();
+  });
+  document.getElementById('stdSel').addEventListener('change', ()=>switchDatalist('stdSel','sizeInput'));
+
+  // Se arrivo qui da "Nuovo articolo…" sulla griglia,
+  // precompilo i campi posizione nel form "Nuovo articolo"
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const cab = params.get('new_for_cab');
+    const col = params.get('new_for_col');
+    const row = params.get('new_for_row');
+
+    if (cab && col && row) {
+      const formNew = document.querySelector('form[action="{{ url_for("add_item") }}"]');
+      if (formNew) {
+        const cabSel = formNew.querySelector('select[name="cabinet_id"]');
+        const colInp = formNew.querySelector('input[name="col_code"]');
+        const rowInp = formNew.querySelector('input[name="row_num"]');
+        if (cabSel) cabSel.value = cab;
+        if (colInp) colInp.value = col;
+        if (rowInp) rowInp.value = row;
+        cabSel?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  } catch (e) {
+    // in caso di browser vecchi senza URLSearchParams, ignoro l'errore
+  }
+});
+
+</script>
+{% endblock %}
