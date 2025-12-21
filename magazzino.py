@@ -132,6 +132,14 @@ class Slot(db.Model):
     is_blocked = db.Column(db.Boolean, nullable=False, default=False)
     __table_args__ = (db.UniqueConstraint('cabinet_id', 'row_num', 'col_code', name='uq_slot_in_cabinet'),)
 
+class DrawerMerge(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    cabinet_id = db.Column(db.Integer, db.ForeignKey("cabinet.id"), nullable=False)
+    row_start = db.Column(db.Integer, nullable=False)
+    row_end = db.Column(db.Integer, nullable=False)
+    col_start = db.Column(db.String(2), nullable=False)
+    col_end = db.Column(db.String(2), nullable=False)
+
 class Item(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     category_id = db.Column(db.Integer, db.ForeignKey("category.id"), nullable=False)
@@ -203,6 +211,62 @@ def iter_cols_upto(max_code:str):
     max_i = max(1, min(max_i, 702))
     for i in range(1, max_i+1):
         yield idx_to_colcode(i)
+
+def normalize_merge_bounds(cab: Cabinet, col_start: str, col_end: str, row_start: int, row_end: int):
+    if not (column_code_valid(col_start) and column_code_valid(col_end)):
+        raise ValueError("Colonna non valida (A..Z o AA..ZZ).")
+    if not (1 <= int(row_start) <= 128 and 1 <= int(row_end) <= 128):
+        raise ValueError("Riga non valida (1..128).")
+    max_col_idx = colcode_to_idx(cab.cols_max or "Z")
+    c_start_idx = colcode_to_idx(col_start)
+    c_end_idx = colcode_to_idx(col_end)
+    if c_start_idx == 0 or c_end_idx == 0:
+        raise ValueError("Colonna non valida (A..Z o AA..ZZ).")
+    if c_start_idx > c_end_idx:
+        c_start_idx, c_end_idx = c_end_idx, c_start_idx
+    if row_start > row_end:
+        row_start, row_end = row_end, row_start
+    if row_start < 1 or row_end > cab.rows_max:
+        raise ValueError("Righe fuori dai limiti della cassettiera.")
+    if c_start_idx < 1 or c_end_idx > max_col_idx:
+        raise ValueError("Colonne fuori dai limiti della cassettiera.")
+    if row_start == row_end and c_start_idx == c_end_idx:
+        raise ValueError("Seleziona almeno due celle adiacenti.")
+    return row_start, row_end, idx_to_colcode(c_start_idx), idx_to_colcode(c_end_idx)
+
+def merge_region_for(cabinet_id: int, col_code: str, row_num: int):
+    merges = DrawerMerge.query.filter_by(cabinet_id=cabinet_id).all()
+    if not merges:
+        return None
+    col_idx = colcode_to_idx(col_code)
+    for m in merges:
+        start_idx = colcode_to_idx(m.col_start)
+        end_idx = colcode_to_idx(m.col_end)
+        if start_idx > end_idx:
+            start_idx, end_idx = end_idx, start_idx
+        row_start = min(m.row_start, m.row_end)
+        row_end = max(m.row_start, m.row_end)
+        if start_idx <= col_idx <= end_idx and row_start <= row_num <= row_end:
+            return {
+                "anchor_col": idx_to_colcode(start_idx),
+                "anchor_row": row_start,
+                "row_start": row_start,
+                "row_end": row_end,
+                "col_start": idx_to_colcode(start_idx),
+                "col_end": idx_to_colcode(end_idx),
+            }
+    return None
+
+def merge_cells_from_region(region):
+    if not region:
+        return []
+    start_idx = colcode_to_idx(region["col_start"])
+    end_idx = colcode_to_idx(region["col_end"])
+    cells = []
+    for row in range(region["row_start"], region["row_end"] + 1):
+        for col_idx in range(start_idx, end_idx + 1):
+            cells.append((idx_to_colcode(col_idx), row))
+    return cells
 
 def make_full_position(cab_name: str, col_code: str, row_num: int) -> str:
     return f"{cab_name}-{col_code.upper()}{int(row_num)}"
@@ -463,6 +527,33 @@ def build_full_grid(cabinet_id:int):
 
     rows = list(range(1, min(128, max(1, int(cab.rows_max))) + 1))
     cols = list(iter_cols_upto(cab.cols_max or "Z"))
+    merge_anchors = {}
+    merge_skips = {}
+    merge_regions = {}
+
+    merges = DrawerMerge.query.filter_by(cabinet_id=cabinet_id).all()
+    for m in merges:
+        try:
+            row_start, row_end, col_start, col_end = normalize_merge_bounds(
+                cab, m.col_start, m.col_end, m.row_start, m.row_end
+            )
+        except ValueError:
+            continue
+        start_idx = colcode_to_idx(col_start)
+        end_idx = colcode_to_idx(col_end)
+        anchor_key = f"{col_start}-{row_start}"
+        merge_anchors[anchor_key] = {"rowspan": row_end - row_start + 1, "colspan": end_idx - start_idx + 1}
+        merge_regions[anchor_key] = {
+            "row_start": row_start,
+            "row_end": row_end,
+            "col_start": col_start,
+            "col_end": col_end,
+        }
+        for row in range(row_start, row_end + 1):
+            for col_idx in range(start_idx, end_idx + 1):
+                key = f"{idx_to_colcode(col_idx)}-{row}"
+                if key != anchor_key:
+                    merge_skips[key] = True
 
     slot_rows = (db.session.query(Slot)
                  .filter(Slot.cabinet_id==cabinet_id)
@@ -494,9 +585,27 @@ def build_full_grid(cabinet_id:int):
                 cell["cat_id"] = it.category_id
         cells[key] = cell
 
+    for anchor_key, region in merge_regions.items():
+        merged_cell = {"blocked": False, "entries": [], "cat_id": None}
+        for col, row in merge_cells_from_region(region):
+            key = f"{col}-{row}"
+            cell = cells.get(key)
+            if cell:
+                if cell.get("blocked"):
+                    merged_cell["blocked"] = True
+                for entry in cell.get("entries", []):
+                    merged_cell["entries"].append(entry)
+                    if merged_cell["cat_id"] is None:
+                        merged_cell["cat_id"] = cell.get("cat_id")
+                if merged_cell["cat_id"] is None and cell.get("cat_id"):
+                    merged_cell["cat_id"] = cell.get("cat_id")
+        cells[anchor_key] = merged_cell
+
     return {
         "rows": rows, "cols": cols, "cells": cells,
-        "cab": {"id": cab.id, "name": cab.name, "comp": cab.compartments_per_slot}
+        "cab": {"id": cab.id, "name": cab.name, "comp": cab.compartments_per_slot},
+        "merge_anchors": merge_anchors,
+        "merge_skips": merge_skips,
     }
 
 def short_cell_text(item: Item) -> str:
@@ -771,6 +880,10 @@ def delete_item(item_id):
 def _assign_position(item, cabinet_id:int, col_code:str, row_num:int):
     if not column_code_valid(col_code):         raise ValueError("Colonna non valida (A..Z o AA..ZZ).")
     if not (1 <= int(row_num) <= 128):          raise ValueError("Riga non valida (1..128).")
+    merge_region = merge_region_for(cabinet_id, col_code, row_num)
+    if merge_region:
+        col_code = merge_region["anchor_col"]
+        row_num = merge_region["anchor_row"]
     slot = Slot.query.filter_by(cabinet_id=cabinet_id, row_num=row_num, col_code=col_code.upper()).first()
     if not slot:
         slot = Slot(cabinet_id=cabinet_id, row_num=row_num, col_code=col_code.upper(), is_blocked=False)
@@ -1065,6 +1178,12 @@ def delete_finish(fin_id):
 def admin_config():
     locations = Location.query.order_by(Location.name).all()
     cabinets  = db.session.query(Cabinet, Location).join(Location, Cabinet.location_id==Location.id).order_by(Cabinet.name).all()
+    drawer_merges = (
+        db.session.query(DrawerMerge, Cabinet)
+        .join(Cabinet, DrawerMerge.cabinet_id == Cabinet.id)
+        .order_by(Cabinet.name, DrawerMerge.row_start, DrawerMerge.col_start)
+        .all()
+    )
     categories = Category.query.order_by(Category.name).all()
     custom_fields = CustomField.query.order_by(CustomField.sort_order, CustomField.name).all()
     serialized_custom_fields = serialize_custom_fields(custom_fields)
@@ -1074,6 +1193,7 @@ def admin_config():
         "admin/config.html",
         locations=locations,
         cabinets=cabinets,
+        drawer_merges=drawer_merges,
         settings=get_settings(),
         categories=categories,
         custom_fields=serialized_custom_fields,
@@ -1256,6 +1376,56 @@ def delete_cabinet(cab_id):
         db.session.delete(cab); db.session.commit(); flash("Cassettiera eliminata.", "success")
     return redirect(url_for("admin_config"))
 
+@app.route("/admin/cabinets/merge_add", methods=["POST"])
+@login_required
+def add_drawer_merge():
+    try:
+        cab_id = int(request.form.get("cabinet_id"))
+    except Exception:
+        return _flash_back("Cassettiera non valida.", "danger", "admin_config")
+    cab = Cabinet.query.get_or_404(cab_id)
+    col_start = (request.form.get("col_start") or "").strip().upper()
+    col_end = (request.form.get("col_end") or "").strip().upper()
+    try:
+        row_start = int(request.form.get("row_start"))
+        row_end = int(request.form.get("row_end"))
+        row_start, row_end, col_start, col_end = normalize_merge_bounds(
+            cab, col_start, col_end, row_start, row_end
+        )
+    except Exception as exc:
+        return _flash_back(str(exc), "danger", "admin_config")
+
+    new_start_idx = colcode_to_idx(col_start)
+    new_end_idx = colcode_to_idx(col_end)
+    existing = DrawerMerge.query.filter_by(cabinet_id=cab.id).all()
+    for m in existing:
+        m_start_idx = colcode_to_idx(m.col_start)
+        m_end_idx = colcode_to_idx(m.col_end)
+        rows_overlap = not (row_end < m.row_start or row_start > m.row_end)
+        cols_overlap = not (new_end_idx < m_start_idx or new_start_idx > m_end_idx)
+        if rows_overlap and cols_overlap:
+            return _flash_back("La fusione si sovrappone a un'altra già definita.", "danger", "admin_config")
+
+    db.session.add(DrawerMerge(
+        cabinet_id=cab.id,
+        row_start=row_start,
+        row_end=row_end,
+        col_start=col_start,
+        col_end=col_end,
+    ))
+    db.session.commit()
+    flash("Fusione cassetti aggiunta.", "success")
+    return redirect(url_for("admin_config"))
+
+@app.route("/admin/cabinets/merge/<int:merge_id>/delete", methods=["POST"])
+@login_required
+def delete_drawer_merge(merge_id):
+    merge = DrawerMerge.query.get_or_404(merge_id)
+    db.session.delete(merge)
+    db.session.commit()
+    flash("Fusione cassetti eliminata.", "success")
+    return redirect(url_for("admin_config"))
+
 def _ensure_slot(cab_id:int, col_code:str, row_num:int) -> Slot:
     s = Slot.query.filter_by(cabinet_id=cab_id, col_code=col_code.upper(), row_num=row_num).first()
     if not s:
@@ -1286,11 +1456,16 @@ def block_slot():
     row    = int(request.form.get("row_num"))
     if not column_code_valid(col) or not (1<=row<=128):
         return _flash_back("Colonna/riga non validi.", "danger", "admin_config")
-    slot = _ensure_slot(cab_id, col, row)
-    if Assignment.query.filter_by(slot_id=slot.id).first():
+    region = merge_region_for(cab_id, col, row)
+    cells = merge_cells_from_region(region) if region else [(col, row)]
+    slots = [_ensure_slot(cab_id, c, r) for c, r in cells]
+    if any(Assignment.query.filter_by(slot_id=slot.id).first() for slot in slots):
         flash("Impossibile bloccare: cassetto occupato.", "danger")
     else:
-        slot.is_blocked = True; db.session.commit(); flash("Cella bloccata.", "success")
+        for slot in slots:
+            slot.is_blocked = True
+        db.session.commit()
+        flash("Cella bloccata.", "success")
     return redirect(url_for("admin_config"))
 
 @app.route("/admin/slots/unblock", methods=["POST"])
@@ -1301,8 +1476,13 @@ def unblock_slot():
     row    = int(request.form.get("row_num"))
     if not column_code_valid(col) or not (1<=row<=128):
         return _flash_back("Colonna/riga non validi.", "danger", "admin_config")
-    slot = _ensure_slot(cab_id, col, row)
-    slot.is_blocked = False; db.session.commit(); flash("Cella sbloccata.", "success")
+    region = merge_region_for(cab_id, col, row)
+    cells = merge_cells_from_region(region) if region else [(col, row)]
+    for c, r in cells:
+        slot = _ensure_slot(cab_id, c, r)
+        slot.is_blocked = False
+    db.session.commit()
+    flash("Cella sbloccata.", "success")
     return redirect(url_for("admin_config"))
 
 @app.route("/admin/slots/move", methods=["POST"])
@@ -1320,6 +1500,15 @@ def move_slot():
         return _flash_back("Parametri non validi.", "danger", "admin_config")
     if not (column_code_valid(col_from) and column_code_valid(col_to) and 1<=row_from<=128 and 1<=row_to<=128):
         return _flash_back("Colonna/riga non validi.", "danger", "admin_config")
+
+    region_from = merge_region_for(cab_from, col_from, row_from)
+    if region_from:
+        col_from = region_from["anchor_col"]
+        row_from = region_from["anchor_row"]
+    region_to = merge_region_for(cab_to, col_to, row_to)
+    if region_to:
+        col_to = region_to["anchor_col"]
+        row_to = region_to["anchor_row"]
 
     src = Slot.query.filter_by(cabinet_id=cab_from, col_code=col_from, row_num=row_from).first()
     if not src: return _flash_back("Slot origine inesistente.", "danger", "admin_config")
@@ -1396,28 +1585,45 @@ def slot_items():
     if not (cab_id and col_code and row_num):
         return jsonify({"ok": False, "error": "Parametri mancanti."}), 400
 
-    slot = Slot.query.filter_by(cabinet_id=cab_id, col_code=col_code, row_num=row_num).first()
-    if not slot:
-        # nessuno slot definito => cella vuota
+    region = merge_region_for(cab_id, col_code, row_num)
+    if region:
+        col_code = region["anchor_col"]
+        row_num = region["anchor_row"]
+        cells = merge_cells_from_region(region)
+    else:
+        cells = [(col_code, row_num)]
+
+    slots = (
+        Slot.query.filter(Slot.cabinet_id == cab_id)
+        .filter(or_(*[
+            (Slot.col_code == col) & (Slot.row_num == row)
+            for col, row in cells
+        ]))
+        .all()
+    )
+    if not slots:
         return jsonify({"ok": True, "items": []})
 
+    slot_ids = [s.id for s in slots]
     assigns = (
-        db.session.query(Assignment, Item, Category)
+        db.session.query(Assignment, Item, Category, Slot)
         .join(Item, Assignment.item_id == Item.id)
         .join(Category, Item.category_id == Category.id, isouter=True)
-        .filter(Assignment.slot_id == slot.id)
-        .order_by(Assignment.compartment_no)
+        .join(Slot, Assignment.slot_id == Slot.id)
+        .filter(Assignment.slot_id.in_(slot_ids))
+        .order_by(Slot.col_code, Slot.row_num, Assignment.compartment_no)
         .all()
     )
 
     items = []
-    for a, it, cat in assigns:
+    for a, it, cat, slot in assigns:
         items.append({
             "id": it.id,
             "name": auto_name_for(it),
             "quantity": it.quantity,
             "category": cat.name if cat else None,
             "color": cat.color if cat else "#999999",
+            "position": f"{slot.col_code}{slot.row_num}",
         })
     return jsonify({"ok": True, "items": items})
 
@@ -2137,6 +2343,19 @@ def lite_migrations():
                 UNIQUE(item_id, field_id),
                 FOREIGN KEY(item_id) REFERENCES item(id),
                 FOREIGN KEY(field_id) REFERENCES custom_field(id)
+            )
+        """)
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='drawer_merge'")
+    if not cur.fetchone():
+        cur.execute("""
+            CREATE TABLE drawer_merge (
+                id INTEGER PRIMARY KEY,
+                cabinet_id INTEGER NOT NULL,
+                row_start INTEGER NOT NULL,
+                row_end INTEGER NOT NULL,
+                col_start TEXT NOT NULL,
+                col_end TEXT NOT NULL,
+                FOREIGN KEY(cabinet_id) REFERENCES cabinet(id)
             )
         """)
     con.commit()
