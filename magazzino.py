@@ -3,7 +3,6 @@ from flask import Flask, render_template, redirect, url_for, request, jsonify, f
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from sqlalchemy import func, select
-from jinja2 import DictLoader
 import os, io, sqlite3
 
 # ===================== DEFAULT ETICHETTE =====================
@@ -59,6 +58,30 @@ class Material(db.Model):
 class Finish(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), unique=True, nullable=False)
+
+class ThreadStandard(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(8), unique=True, nullable=False)
+    label = db.Column(db.String(50), nullable=False)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+
+class ThreadSize(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    standard_id = db.Column(db.Integer, db.ForeignKey("thread_standard.id"), nullable=False)
+    value = db.Column(db.String(32), nullable=False)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    __table_args__ = (db.UniqueConstraint('standard_id', 'value', name='uq_size_per_standard'),)
+    standard = db.relationship("ThreadStandard")
+
+class DriveOption(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(64), unique=True, nullable=False)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+
+class StandoffConfigOption(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(32), unique=True, nullable=False)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
 
 class Subtype(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -205,6 +228,23 @@ def get_settings()->Settings:
 @app.context_processor
 def inject_utils():
     return dict(compose_caption=auto_name_for, app_settings=get_settings)
+
+def load_form_options():
+    thread_standards = ThreadStandard.query.order_by(ThreadStandard.sort_order, ThreadStandard.label).all()
+    thread_sizes = (
+        ThreadSize.query.join(ThreadStandard)
+        .order_by(ThreadStandard.sort_order, ThreadSize.sort_order, ThreadSize.value)
+        .all()
+    )
+    sizes_by_standard = {}
+    for size in thread_sizes:
+        sizes_by_standard.setdefault(size.standard.code, []).append(size.value)
+    drive_options = DriveOption.query.order_by(DriveOption.sort_order, DriveOption.name).all()
+    standoff_cfgs = StandoffConfigOption.query.order_by(
+        StandoffConfigOption.sort_order,
+        StandoffConfigOption.name,
+    ).all()
+    return thread_standards, sizes_by_standard, drive_options, standoff_cfgs
 
 # ===================== AUTH =====================
 @login_manager.user_loader
@@ -414,19 +454,17 @@ def admin_items():
     )
     pos_by_item = {a.item_id: make_full_position(a.name, a.col_code, a.row_num) for a in assignments}
 
-    metric_sizes = ["M2","M2.5","M3","M4","M5","M6","M8","M10","M12","M14","M16"]
-    unc_sizes    = ["#2-56","#4-40","#6-32","#8-32","#10-24","1/4-20","5/16-18","3/8-16","1/2-13"]
-    unf_sizes    = ["#2-64","#4-48","#6-40","#8-36","#10-32","1/4-28","5/16-24","3/8-24","1/2-20"]
+    thread_standards, sizes_by_standard, drive_options, standoff_cfgs = load_form_options()
+    default_standard_code = next(
+        (s.code for s in thread_standards if s.code == "M"),
+        thread_standards[0].code if thread_standards else "",
+    )
 
     # ID per condizioni UI
     viti = Category.query.filter_by(name="Viti").first()
     torrette = Category.query.filter_by(name="Torrette").first()
     viti_id = viti.id if viti else None
     torrette_id = torrette.id if torrette else None
-
-    # impronte viti e configurazioni torrette
-    drive_options = ["Taglio", "Phillips (PH)", "Pozidriv (PZ)", "Torx (TX)", "Esagonale incassato (brugola)", "Robertson (quadra)", "Spanner"]
-    standoff_cfgs = ["M/F", "F/F", "M/M", "Passante"]
 
     subtypes_by_cat = {}
     for s in subtypes:
@@ -439,7 +477,9 @@ def admin_items():
         items=items, categories=categories, materials=materials, finishes=finishes,
         locations=locations, cabinets=cabinets,
         subtypes_by_cat=subtypes_by_cat,
-        metric_sizes=metric_sizes, unc_sizes=unc_sizes, unf_sizes=unf_sizes,
+        thread_standards=thread_standards,
+        sizes_by_standard=sizes_by_standard,
+        default_standard_code=default_standard_code,
         rondelle_id=rondelle_id,
         viti_id=viti_id, torrette_id=torrette_id,
         drive_options=drive_options, standoff_cfgs=standoff_cfgs,
@@ -529,9 +569,7 @@ def edit_item(item_id):
     for s in subtypes:
         subtypes_by_cat.setdefault(s.category_id, []).append({"id": s.id, "name": s.name})
 
-    metric_sizes = ["M2","M2.5","M3","M4","M5","M6","M8","M10","M12","M14","M16"]
-    unc_sizes    = ["#2-56","#4-40","#6-32","#8-32","#10-24","1/4-20","5/16-18","3/8-16","1/2-13"]
-    unf_sizes    = ["#2-64","#4-48","#6-40","#8-36","#10-32","1/4-28","5/16-24","3/8-24","1/2-20"]
+    thread_standards, sizes_by_standard, drive_options, standoff_cfgs = load_form_options()
 
     pos = (db.session.query(Assignment, Slot, Cabinet)
            .join(Slot, Assignment.slot_id == Slot.id)
@@ -543,16 +581,13 @@ def edit_item(item_id):
     torrette = Category.query.filter_by(name="Torrette").first()
     viti_id = viti.id if viti else None
     torrette_id = torrette.id if torrette else None
-    drive_options = ["Taglio", "Phillips (PH)", "Pozidriv (PZ)", "Torx (TX)", "Esagonale incassato (brugola)", "Robertson (quadra)", "Spanner"]
-    standoff_cfgs = ["M/F", "F/F", "M/M", "Passante"]
-
     rondelle = Category.query.filter_by(name="Rondelle").first()
     rondelle_id = rondelle.id if rondelle else None
 
     return render_template("admin/edit_item.html",
         item=item, categories=categories, materials=materials, finishes=finishes,
         cabinets=cabinets, subtypes_by_cat=subtypes_by_cat,
-        metric_sizes=metric_sizes, unc_sizes=unc_sizes, unf_sizes=unf_sizes,
+        thread_standards=thread_standards, sizes_by_standard=sizes_by_standard,
         rondelle_id=rondelle_id,
         viti_id=viti_id, torrette_id=torrette_id,
         drive_options=drive_options, standoff_cfgs=standoff_cfgs
@@ -1737,1552 +1772,6 @@ def labels_pdf():
     c.save(); buf.seek(0)
     return send_file(buf, as_attachment=True, download_name="etichette.pdf", mimetype="application/pdf")
 
-# ===================== TEMPLATES =====================
-BASE_TMPL = """\
-<!doctype html>
-<html lang="it">
-<head>
-  <meta charset="utf-8"><title>Magazzino</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css" rel="stylesheet">
-  <style>
-    body { background-color: #f8f9fa; }
-    .navbar-brand { font-weight: 600; }
-    .form-section { background: #fff; border-radius: 10px; padding: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-    .badge-color { display:inline-block; width:12px; height:12px; border-radius:50%; margin-right:6px; vertical-align:middle; }
-        .grid-wrap {
-      overflow:auto;
-      border:1px solid #ddd;
-      border-radius:8px;
-      background:#fff;
-      max-height: 65vh;
-      width: 100%;
-    }
-    .grid-table {
-      border-collapse: separate;
-      border-spacing: 0;
-      font-size: 12px;
-      width: 100%;
-      table-layout: fixed;
-    }
-    .grid-table th, .grid-table td {
-      border: 1px solid #e5e5e5;
-      text-align: center;
-      min-width: 48px;
-      height: 48px; min-height: 48px;
-      padding: 0;
-      vertical-align: middle;
-    }
-
-    .grid-table thead th { position: sticky; top: 0; background: #f1f1f1; z-index: 3; }
-    .grid-table .rowhdr { position: sticky; left: 0; background: #f7f7f7; z-index: 2; width: 54px; min-width: 54px; padding-right: 6px; text-align: right; }
-    .grid-table thead .rowhdr { z-index: 4; }
-    .cell-empty { background: #fafafa; color:#999; cursor: pointer; }
-    .cell-blocked { background: #000; color:#fff; }
-    .cell-used { cursor: pointer; }
-    .cell-inner {
-      padding: 4px 6px;
-      line-height: 1.05;
-      display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
-      overflow: hidden;
-      font-size: 11px;
-      color: #fff;
-      font-weight: 600;
-      text-shadow: 0 1px 1px rgba(0,0,0,.35);
-    }
-    .legend span { display:inline-block; width:12px; height:12px; margin-right:6px; border-radius:2px; }
-  </style>
-</head>
-<body>
-  <nav class="navbar navbar-dark bg-dark">
-    <div class="container-fluid">
-      <a class="navbar-brand" href="/">Magazzino</a>
-      <div class="d-flex gap-2">
-        {% if current_user.is_authenticated %}
-          <a href="{{ url_for('index') }}" class="btn btn-outline-light btn-sm">Magazzino principale</a>
-          <a href="{{ url_for('admin_items') }}" class="btn btn-outline-light btn-sm">Articoli</a>
-          <a href="{{ url_for('to_place') }}" class="btn btn-outline-light btn-sm">Da posizionare</a>
-          <a href="{{ url_for('auto_assign') }}" class="btn btn-outline-light btn-sm">Assegnamento</a>
-          <a href="{{ url_for('admin_categories') }}" class="btn btn-outline-light btn-sm">Categorie</a>
-          <a href="{{ url_for('admin_config') }}" class="btn btn-outline-light btn-sm">Configurazione</a>
-          <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Logout</a>
-        {% else %}
-          <a href="{{ url_for('login') }}" class="btn btn-outline-light btn-sm">Login</a>
-        {% endif %}
-      </div>
-    </div>
-  </nav>
-  <div class="container py-3">
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        <div class="mb-2">
-          {% for cat, msg in messages %}
-            <div class="alert alert-{{ cat }} py-2 mb-1">{{ msg }}</div>
-          {% endfor %}
-        </div>
-      {% endif %}
-    {% endwith %}
-    {% block content %}{% endblock %}
-  </div>
-  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-  <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
-"""
-
-INDEX_TMPL = """\
-{% extends "base.html" %}
-{% block content %}
-<h3>Elenco articoli</h3>
-<form class="row g-2 mb-3">
-  <div class="col-md-3">
-    <select name="category_id" class="form-select">
-      <option value="">Tutte le categorie</option>
-      {% for c in categories %}
-        <option value="{{ c.id }}" {{ 'selected' if (request.args.get('category_id')|int)==c.id else '' }}>{{ c.name }}</option>
-      {% endfor %}
-    </select>
-  </div>
-  <div class="col-md-3">
-    <select name="material_id" class="form-select">
-      <option value="">Tutti i materiali</option>
-      {% for m in materials %}
-        <option value="{{ m.id }}" {{ 'selected' if (request.args.get('material_id')|int)==m.id else '' }}>{{ m.name }}</option>
-      {% endfor %}
-    </select>
-  </div>
-  <div class="col-md-3"><input type="text" name="measure" class="form-control" placeholder="Cerca misura (es. M3, 1/4-20)" value="{{ request.args.get('measure','') }}"></div>
-  <div class="col-md-3"><button class="btn btn-primary btn-sm">Filtra</button> <a href="{{ url_for('index') }}" class="btn btn-secondary btn-sm">Reset</a></div>
-</form>
-
-<table class="table table-striped table-hover" id="itemsTable">
-  <thead><tr>
-    <th>ID</th><th>Categoria</th><th>Descrizione</th><th>Misura</th>
-    <th>Dim. principale (mm)</th><th>Spessore (mm)</th><th>Materiale</th><th>Quantità</th><th>Posizione</th>
-  </tr></thead>
-  <tbody>
-    {% for item in items %}
-    <tr>
-      <td>{{ item.id }}</td>
-      <td>{% if item.category %}<span class="badge-color" style="background:{{ item.category.color }}"></span>{{ item.category.name }}{% endif %}</td>
-      <td>{{ compose_caption(item) }}</td>
-      <td>{{ item.thread_size }}</td>
-      <td>{{ '%.2f'|format(item.main_size_mm) if item.main_size_mm is not none else '' }}</td>
-      <td>{{ '%.2f'|format(item.thickness_mm) if item.thickness_mm is not none else '' }}</td>
-      <td>{{ item.material.name if item.material else '' }}</td>
-      <td>{{ item.quantity }}</td>
-      <td>{{ pos_by_item.get(item.id, '') }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-<script>$(function(){ if ($.fn.DataTable) $('#itemsTable').DataTable({ pageLength: 25, order:[[1,'asc']] });});</script>
-
-<hr class="my-4">
-
-<h4>Griglia cassettiera</h4>
-<form class="row g-2 mb-2">
-  <div class="col-md-4">
-    <select name="cabinet_id" class="form-select" onchange="this.form.submit()">
-      {% for c in cabinets %}
-        <option value="{{ c.id }}" {{ 'selected' if c.id==selected_cab_id else '' }}>{{ c.name }}</option>
-      {% endfor %}
-    </select>
-  </div>
-</form>
-
-<div class="legend mb-2">
-  <span style="background:black"></span> Bloccata
-  {% for c in categories %}
-    <span style="background:{{ c.color }}; margin-left:12px;"></span> {{ c.name }}
-  {% endfor %}
-</div>
-
-<div class="grid-wrap p-2">
-  {% if grid.rows and grid.cols %}
-  <table class="grid-table" id="grid" data-cab="{{ grid.cab.id }}" data-comp="{{ grid.cab.comp }}">
-    <thead>
-      <tr>
-        <th class="rowhdr">r\\c</th>
-        {% for col in grid.cols %}
-          <th>{{ col }}</th>
-        {% endfor %}
-      </tr>
-    </thead>
-    <tbody>
-      {% for r in grid.rows %}
-      <tr>
-        <th class="rowhdr">{{ r }}</th>
-        {% for col in grid.cols %}
-          {% set key = col ~ '-' ~ r %}
-          {% set cell = grid.cells.get(key) %}
-          {% if not cell %}
-            <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="">
-              <div class="cell-inner" style="color:#777; text-shadow:none; font-weight:500;">&nbsp;</div>
-            </td>
-          {% else %}
-            {% if cell.blocked %}
-              <td class="cell-blocked" data-col="{{ col }}" data-row="{{ r }}" data-cat="blocked">—</td>
-            {% elif cell.entries and (cell.entries|length)>0 %}
-              {% set colhex = cell.entries[0].color %}
-              {% set texts = (cell.entries | map(attribute='text') | list) %}
-              <td class="cell-used" style="background: {{ colhex }}" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}">
-                <div class="cell-inner">
-                  {% if texts|length>0 %}<div>{{ texts[0] }}</div>{% endif %}
-                  {% if texts|length>1 %}<div>{{ texts[1] }}</div>{% endif %}
-                  {% if texts|length>2 %}<div>+{{ texts|length-2 }}</div>{% endif %}
-                </div>
-              </td>
-            {% else %}
-              <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="">
-                <div class="cell-inner" style="color:#777; text-shadow:none; font-weight:500;">&nbsp;</div>
-              </td>
-            {% endif %}
-          {% endif %}
-        {% endfor %}
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-    <div class="text-muted p-3">Configura una cassettiera per visualizzare la griglia.</div>
-  {% endif %}
-</div>
-
-{% if is_admin %}
-<!-- Modal assegnazione -->
-<div class="modal fade" id="assignModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-scrollable">
-    <div class="modal-content">
-      <form id="assignForm">
-      <div class="modal-header">
-        <h5 class="modal-title">Assegna articolo a <span id="slotLabel"></span></h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Chiudi"></button>
-      </div>
-      <div class="modal-body">
-        <div class="sticky-top">
-          <div class="mb-2"><input type="text" id="flt" class="form-control" placeholder="Filtra (testo libero)"></div>
-        </div>
-        <input type="hidden" name="cabinet_id" id="cab_id" value="{{ grid.cab.id if grid.cab else '' }}">
-        <input type="hidden" name="col_code" id="col_code">
-        <input type="hidden" name="row_num" id="row_num">
-        <div class="mb-2"><small class="text-muted">Mostro solo articoli senza posizione. Se la cella è già occupata, verranno accettati solo articoli della stessa categoria.</small></div>
-        <select name="item_id" id="item_id" size="12" class="form-select">
-          {% for it in unplaced_json %}
-            <option value="{{ it.id }}" data-cat="{{ it.category_id }}">{{ it.caption }}</option>
-          {% endfor %}
-        </select>
-        <div class="mt-2"><small class="text-muted">Totale elementi: <span id="totCnt">{{ unplaced_json|length }}</span></small></div>
-        <div id="assignError" class="text-danger small mt-2 d-none"></div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-primary">Assegna</button>
-        <button type="button" class="btn btn-outline-secondary" id="btnNewItem">Nuovo articolo…</button>
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annulla</button>
-      </div>
-      </form>
-    </div>
-  </div>
-</div>
-
-<!-- Modal contenuto cella -->
-<div class="modal fade" id="slotModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">Contenuto cella <span id="slotLabel2"></span></h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Chiudi"></button>
-      </div>
-      <div class="modal-body">
-        <input type="hidden" id="slot_cab_id" value="{{ grid.cab.id if grid.cab else '' }}">
-        <input type="hidden" id="slot_col_code">
-        <input type="hidden" id="slot_row_num">
-        <div id="slotEmptyMsg" class="text-muted small d-none">Nessun articolo assegnato a questa cella.</div>
-        <table class="table table-sm align-middle mb-0" id="slotItemsTable">
-          <thead>
-            <tr><th>Articolo</th><th>Q.ta</th><th>Azioni</th></tr>
-          </thead>
-          <tbody id="slotItemsBody"></tbody>
-        </table>
-        <div id="slotError" class="text-danger small mt-2 d-none"></div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-outline-secondary" id="btnSlotAdd">Aggiungi articolo senza posizione…</button>
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Chiudi</button>
-      </div>
-    </div>
-  </div>
-</div>
-{% endif %}
-
-
-<script>
-{% if is_admin %}
-const UNPLACED = {{ unplaced_json|tojson }};
-const CLEAR_URL_TEMPLATE = '{{ url_for("slot_clear_item", item_id=0) }}';
-
-function openAssignModal(col, row, catFilter){
-  const modal = new bootstrap.Modal(document.getElementById('assignModal'));
-  document.getElementById('slotLabel').textContent = `${col}${row}`;
-  document.getElementById('col_code').value = col;
-  document.getElementById('row_num').value = row;
-  const sel = document.getElementById('item_id');
-  sel.innerHTML = '';
-  let list = UNPLACED.slice();
-  if (catFilter) list = list.filter(x => x.category_id == parseInt(catFilter));
-  list.forEach(x=>{
-    const o = document.createElement('option');
-    o.value = x.id;
-    o.textContent = x.caption;
-    o.dataset.cat = x.category_id;
-    sel.appendChild(o);
-  });
-  document.getElementById('totCnt').textContent = list.length;
-  document.getElementById('flt').value = '';
-  document.getElementById('assignError').classList.add('d-none');
-  modal.show();
-}
-
-function openSlotModal(col, row){
-  const grid = document.getElementById('grid');
-  const cabId = document.getElementById('cab_id')?.value || grid?.dataset.cab;
-  if (!cabId) return;
-
-  const modalEl = document.getElementById('slotModal');
-  const modal = new bootstrap.Modal(modalEl);
-
-  document.getElementById('slotLabel2').textContent = `${col}${row}`;
-  document.getElementById('slot_col_code').value = col;
-  document.getElementById('slot_row_num').value = row;
-  document.getElementById('slotError').classList.add('d-none');
-  document.getElementById('slotEmptyMsg').classList.add('d-none');
-
-  const tbody = document.getElementById('slotItemsBody');
-  tbody.innerHTML = '<tr><td colspan="3"><small class="text-muted">Caricamento...</small></td></tr>';
-
-  fetch(`{{ url_for("slot_items") }}?cabinet_id=${encodeURIComponent(cabId)}&col_code=${encodeURIComponent(col)}&row_num=${encodeURIComponent(row)}`)
-    .then(r => r.json())
-    .then(j => {
-      tbody.innerHTML = '';
-      if (!j.ok) {
-        document.getElementById('slotError').textContent = j.error || 'Errore caricamento contenuto.';
-        document.getElementById('slotError').classList.remove('d-none');
-        return;
-      }
-      if (!j.items || !j.items.length) {
-        document.getElementById('slotEmptyMsg').classList.remove('d-none');
-        return;
-      }
-
-      j.items.forEach(it => {
-        const tr = document.createElement('tr');
-
-        const tdName = document.createElement('td');
-        tdName.innerHTML = `<span class="badge-color" style="background:${it.color};"></span> ${it.name}`;
-
-        const tdQty = document.createElement('td');
-        tdQty.textContent = (it.quantity !== null && it.quantity !== undefined) ? it.quantity : '';
-
-        const tdActions = document.createElement('td');
-        tdActions.className = 'text-nowrap';
-        tdActions.innerHTML = `
-          <button type="button" class="btn btn-sm btn-outline-primary me-1" data-edit-id="${it.id}">Modifica</button>
-          <button type="button" class="btn btn-sm btn-outline-danger" data-remove-id="${it.id}">Rimuovi posizione</button>
-        `;
-
-        tr.appendChild(tdName);
-        tr.appendChild(tdQty);
-        tr.appendChild(tdActions);
-        tbody.appendChild(tr);
-      });
-
-      // azioni: modifica / rimuovi
-      tbody.querySelectorAll('button[data-edit-id]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const id = btn.getAttribute('data-edit-id');
-          window.location.href = '/admin/items/' + id + '/edit';
-        });
-      });
-
-    tbody.querySelectorAll('button[data-remove-id]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const id = btn.getAttribute('data-remove-id');
-        if (!confirm('Rimuovere la posizione per questo articolo?')) return;
-        try {
-          const url = CLEAR_URL_TEMPLATE.replace('0', id);
-          const resp = await fetch(url, { method: 'POST' });
-          const jj = await resp.json().catch(()=>({ok:false}));
-          if (!jj.ok) {
-            alert(jj.error || 'Errore nella rimozione.');
-            return;
-          }
-          // chiudo il modal e ricarico la pagina principale
-          const modalEl = document.getElementById('slotModal');
-          const inst = bootstrap.Modal.getInstance(modalEl);
-          if (inst) inst.hide();
-          location.reload();
-        } catch (e) {
-          alert('Errore di comunicazione.');
-        }
-      });
-    });
-
-    })
-    .catch(() => {
-      tbody.innerHTML = '';
-      document.getElementById('slotError').textContent = 'Errore di comunicazione.';
-      document.getElementById('slotError').classList.remove('d-none');
-    });
-
-  modal.show();
-}
-
-document.addEventListener('DOMContentLoaded', function(){
-  const grid = document.getElementById('grid');
-  if (!grid) return;
-
-  // Click su cella:
-  //  - cella bloccata → avviso
-  //  - cella occupata → modal contenuto cella
-  //  - cella vuota    → modal assegnazione (articoli senza posizione)
-  grid.addEventListener('click', function(e){
-    const td = e.target.closest('td');
-    if (!td) return;
-    if (td.classList.contains('cell-blocked')) { alert('Cella bloccata.'); return; }
-    if (!{{ 'true' if is_admin else 'false' }}) return;
-
-    const col = td.dataset.col;
-    const row = td.dataset.row;
-    const cat = td.dataset.cat;
-
-    if (!col || !row) return;
-    if (cat === 'blocked') { alert('Cella bloccata.'); return; }
-
-    if (td.classList.contains('cell-used')) {
-      openSlotModal(col, row);
-    } else {
-      openAssignModal(col, row, cat || null);
-    }
-  });
-
-  // Filtro lista articoli non assegnati
-  document.getElementById('flt')?.addEventListener('input', function(){
-    const term = this.value.toLowerCase();
-    const sel = document.getElementById('item_id');
-    let visibleCount = 0;
-    Array.from(sel.options).forEach(opt=>{
-      const show = !term || opt.textContent.toLowerCase().includes(term);
-      opt.hidden = !show;
-      if (show) visibleCount++;
-    });
-    document.getElementById('totCnt').textContent = visibleCount;
-  });
-
-  // Submit assegnazione
-  document.getElementById('assignForm')?.addEventListener('submit', async function(ev){
-    ev.preventDefault();
-    const fd = new FormData(ev.target);
-    const r = await fetch('{{ url_for("grid_assign") }}', { method:'POST', body: fd });
-    const j = await r.json().catch(()=>({ok:false, error:'Errore sconosciuto'}));
-    if (!j.ok) {
-      const el = document.getElementById('assignError');
-      el.textContent = j.error || 'Errore di assegnazione';
-      el.classList.remove('d-none');
-    } else {
-      location.reload();
-    }
-  });
-
-  // Bottone "Nuovo articolo…" → va alla pagina admin con posizione precompilata
-  const btnNewItem = document.getElementById('btnNewItem');
-  if (btnNewItem) {
-    btnNewItem.addEventListener('click', function () {
-      const cabId = document.getElementById('cab_id').value || grid.dataset.cab;
-      const col   = document.getElementById('col_code').value;
-      const row   = document.getElementById('row_num').value;
-
-      if (!cabId || !col || !row) {
-        return;
-      }
-
-      const params = new URLSearchParams({
-        new_for_cab: cabId,
-        new_for_col: col,
-        new_for_row: row
-      });
-
-      window.location.href = '{{ url_for("admin_items") }}?' + params.toString();
-    });
-  }
-
-  // Bottone nel modal contenuto cella per aggiungere articolo senza posizione
-  const btnSlotAdd = document.getElementById('btnSlotAdd');
-  if (btnSlotAdd) {
-    btnSlotAdd.addEventListener('click', function () {
-      const col = document.getElementById('slot_col_code').value;
-      const row = document.getElementById('slot_row_num').value;
-      if (!col || !row) return;
-
-      const modalEl = document.getElementById('slotModal');
-      const inst = bootstrap.Modal.getInstance(modalEl);
-      inst?.hide();
-
-      openAssignModal(col, row, null);
-    });
-  }
-});
-{% endif %}
-</script>
-{% endblock %}
-"""
-
-
-LOGIN_TMPL = """\
-{% extends "base.html" %}
-{% block content %}
-<h3>Login</h3>
-<form method="post" class="form-section" style="max-width:420px">
-  <div class="mb-3"><label>Username</label><input type="text" class="form-control" name="username" required></div>
-  <div class="mb-3"><label>Password</label><input type="password" class="form-control" name="password" required></div>
-  <button type="submit" class="btn btn-primary">Login</button>
-</form>
-{% endblock %}
-"""
-
-ADMIN_DASH_TMPL = r"""\
-{% extends "base.html" %}
-{% block content %}
-<h3>Articoli (Admin)</h3>
-
-<div class="form-section mb-3">
-  <form id="labelForm" method="post" action="{{ url_for('labels_pdf') }}">
-    <div class="d-flex justify-content-between align-items-center mb-2">
-      <h5 class="mb-0">Elenco</h5>
-      <div>
-        <button class="btn btn-sm btn-primary">Stampa etichette</button>
-      </div>
-    </div>
-    <table class="table table-striped table-hover" id="admItemsTable">
-      <thead>
-        <tr>
-          <th style="width:36px;"><input type="checkbox" id="chkAll"></th>
-          <th>ID</th>
-          <th>Categoria</th>
-          <th>Nome</th>
-          <th>Misura</th>
-          <th>Dim. princ. (mm)</th>
-          <th>Spessore (mm)</th>
-          <th>Materiale</th>
-          <th>Q.ta</th>
-          <th>Posizione</th>
-          <th>Azione</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for it in items %}
-        <tr>
-          <td><input type="checkbox" name="item_ids" value="{{ it.id }}"></td>
-          <td>{{ it.id }}</td>
-          <td>{% if it.category %}<span class="badge-color" style="background:{{ it.category.color }}"></span>{{ it.category.name }}{% endif %}</td>
-          <td>{{ compose_caption(it) }}</td>
-          <td>{{ it.thread_size or "" }}</td>
-          <td>{{ '%.2f'|format(it.main_size_mm) if it.main_size_mm is not none else '' }}</td>
-          <td>{{ '%.2f'|format(it.thickness_mm) if it.thickness_mm is not none else '' }}</td>
-          <td>{{ it.material.name if it.material else '' }}</td>
-          <td>{{ it.quantity }}</td>
-          <td>{{ pos_by_item.get(it.id, '') }}</td>
-          <td class="text-nowrap">
-            <a href="{{ url_for('edit_item', item_id=it.id) }}" class="btn btn-sm btn-outline-primary">Modifica</a>
-            <form method="post" action="{{ url_for('delete_item', item_id=it.id) }}" class="d-inline" onsubmit="return confirm('Eliminare articolo?')">
-              <button class="btn btn-sm btn-outline-danger">Elimina</button>
-            </form>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </form>
-</div>
-
-<div class="form-section">
-  <h5 class="mb-2">Nuovo articolo</h5>
-  <form method="post" action="{{ url_for('add_item') }}">
-    <div class="row g-2">
-      <div class="col-md-6">
-        <label class="form-label">Categoria</label>
-        <select class="form-select" name="category_id" id="catSel" required>
-          <option value="">—</option>
-          {% for c in categories %}
-            <option value="{{ c.id }}">{{ c.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="col-md-6">
-        <label class="form-label">Sottotipo (forma)</label>
-        <select class="form-select" name="subtype_id" id="subtypeSel">
-          <option value="">—</option>
-        </select>
-      </div>
-
-      <div class="col-md-4">
-        <label class="form-label">Standard</label>
-        <select class="form-select" name="thread_standard" id="stdSel">
-          <option value="M" selected>Metrico</option>
-          <option value="UNC">UNC</option>
-          <option value="UNF">UNF</option>
-        </select>
-      </div>
-      <div class="col-md-8">
-        <label class="form-label">Misura (es. M3 / 1/4-20)</label>
-        <input class="form-control" name="thread_size" id="sizeInput" list="sizesM">
-        <datalist id="sizesM">{% for s in metric_sizes %}<option value="{{ s }}">{% endfor %}</datalist>
-        <datalist id="sizesUNC">{% for s in unc_sizes %}<option value="{{ s }}">{% endfor %}</datalist>
-        <datalist id="sizesUNF">{% for s in unf_sizes %}<option value="{{ s }}">{% endfor %}</datalist>
-      </div>
-
-      <div class="col-md-4">
-        <label class="form-label">Impronta (Viti)</label>
-        <select class="form-select" name="drive" id="driveSel">
-          <option value="">—</option>
-          {% for d in drive_options %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
-        </select>
-      </div>
-      <div class="col-md-4">
-        <label class="form-label">Configurazione (Torrette)</label>
-        <select class="form-select" name="standoff_config" id="standoffSel">
-          <option value="">—</option>
-          {% for d in standoff_cfgs %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
-        </select>
-      </div>
-
-      <div class="col-md-4">
-        <label class="form-label">Dimensione principale (mm)</label>
-        <input type="number" step="0.01" class="form-control" name="main_size_mm" placeholder="L (viti/torrette) o Øe (rondelle)">
-      </div>
-      <div class="col-md-3 dim-washer">
-        <label class="form-label">Ø interno (mm)</label>
-        <input type="number" step="0.01" class="form-control" name="inner_d_mm">
-      </div>
-      <div class="col-md-3 dim-washer">
-        <label class="form-label">Spessore (mm)</label>
-        <input type="number" step="0.01" class="form-control" name="thickness_mm">
-      </div>
-
-      <div class="col-md-6">
-        <label class="form-label">Materiale</label>
-        <select class="form-select" name="material_id">
-          <option value="">—</option>
-          {% for m in materials %}<option value="{{ m.id }}">{{ m.name }}</option>{% endfor %}
-        </select>
-      </div>
-      <div class="col-md-6">
-        <label class="form-label">Finitura</label>
-        <select class="form-select" name="finish_id">
-          <option value="">—</option>
-          {% for f in finishes %}<option value="{{ f.id }}">{{ f.name }}</option>{% endfor %}
-        </select>
-      </div>
-
-      <div class="col-md-12">
-        <label class="form-label">Descrizione (opz.)</label>
-        <input type="text" class="form-control" name="description">
-      </div>
-
-      <div class="col-md-4">
-        <label class="form-label">Quantità</label>
-        <input type="number" min="0" step="1" class="form-control" name="quantity" value="0">
-      </div>
-
-      <div class="col-md-8">
-        <label class="form-label d-block">Campi in etichetta</label>
-        <div class="form-check form-check-inline">
-          <input class="form-check-input" type="checkbox" name="label_show_category" checked>
-          <label class="form-check-label">Categoria</label>
-        </div>
-        <div class="form-check form-check-inline">
-          <input class="form-check-input" type="checkbox" name="label_show_subtype" checked>
-          <label class="form-check-label">Sottotipo</label>
-        </div>
-        <div class="form-check form-check-inline">
-          <input class="form-check-input" type="checkbox" name="label_show_measure" checked>
-          <label class="form-check-label">Misura</label>
-        </div>
-        <div class="form-check form-check-inline">
-          <input class="form-check-input" type="checkbox" name="label_show_main" checked>
-          <label class="form-check-label">Dim. principale</label>
-        </div>
-        <div class="form-check form-check-inline">
-          <input class="form-check-input" type="checkbox" name="label_show_material" checked>
-          <label class="form-check-label">Materiale</label>
-        </div>
-      </div>
-
-      <div class="col-12"><hr></div>
-
-      <div class="col-md-4">
-        <label class="form-label">Cassettiera</label>
-        <select class="form-select" name="cabinet_id">
-          <option value="">(assegna dopo)</option>
-          {% for c in cabinets %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
-        </select>
-      </div>
-      <div class="col-md-4">
-        <label class="form-label">Colonna (A..ZZ)</label>
-        <input class="form-control" name="col_code" placeholder="es. D">
-      </div>
-      <div class="col-md-4">
-        <label class="form-label">Riga (1..128)</label>
-        <input type="number" min="1" max="128" class="form-control" name="row_num">
-      </div>
-
-      <div class="col-12 text-end">
-        <button class="btn btn-primary">Salva</button>
-      </div>
-    </div>
-  </form>
-</div>
-
-<script>
-const SUBTYPES = {{ subtypes_by_cat|tojson }};
-const RONDELLE_ID = {{ rondelle_id or 'null' }};
-const VITI_ID = {{ viti_id or 'null' }};
-const TORRETTE_ID = {{ torrette_id or 'null' }};
-
-function populateSubtypes(catId, targetSelId){
-  const sel = document.getElementById(targetSelId);
-  sel.innerHTML = '<option value="">—</option>';
-  if (!catId || !SUBTYPES[catId]) return;
-  SUBTYPES[catId].forEach(s=>{
-    const o = document.createElement('option');
-    o.value = s.id; o.textContent = s.name;
-    sel.appendChild(o);
-  });
-}
-function toggleSpecificFields(){
-  const catId = parseInt(document.getElementById('catSel').value || 0);
-  const isRondelle = (RONDELLE_ID && catId===RONDELLE_ID);
-  const isViti = (VITI_ID && catId===VITI_ID);
-  const isTorrette = (TORRETTE_ID && catId===TORRETTE_ID);
-  document.querySelectorAll('.dim-washer').forEach(el=> el.style.display = isRondelle ? '' : 'none');
-  document.getElementById('driveSel').closest('.col-md-4').style.display = isViti ? '' : 'none';
-  document.getElementById('standoffSel').closest('.col-md-4').style.display = isTorrette ? '' : 'none';
-}
-function switchDatalist(stdSelId, inputId){
-  const std = document.getElementById(stdSelId).value;
-  const inp = document.getElementById(inputId);
-  if (std === 'M') inp.setAttribute('list','sizesM');
-  else if (std === 'UNC') inp.setAttribute('list','sizesUNC');
-  else if (std === 'UNF') inp.setAttribute('list','sizesUNF');
-  else inp.removeAttribute('list');
-}
-
-document.addEventListener('DOMContentLoaded', ()=>{
-  if ($.fn.DataTable) $('#admItemsTable').DataTable({pageLength:25, order:[[1,'asc']]});
-  document.getElementById('chkAll')?.addEventListener('change', (e)=>{
-    document.querySelectorAll('input[name="item_ids"]').forEach(cb=> cb.checked = e.target.checked);
-  });
-  toggleSpecificFields();
-  document.getElementById('catSel').addEventListener('change', e=>{
-    populateSubtypes(parseInt(e.target.value||0), 'subtypeSel');
-    toggleSpecificFields();
-  });
-  document.getElementById('stdSel').addEventListener('change', ()=>switchDatalist('stdSel','sizeInput'));
-
-  // Se arrivo qui da "Nuovo articolo…" sulla griglia,
-  // precompilo i campi posizione nel form "Nuovo articolo"
-  try {
-    const params = new URLSearchParams(window.location.search);
-    const cab = params.get('new_for_cab');
-    const col = params.get('new_for_col');
-    const row = params.get('new_for_row');
-
-    if (cab && col && row) {
-      const formNew = document.querySelector('form[action="{{ url_for("add_item") }}"]');
-      if (formNew) {
-        const cabSel = formNew.querySelector('select[name="cabinet_id"]');
-        const colInp = formNew.querySelector('input[name="col_code"]');
-        const rowInp = formNew.querySelector('input[name="row_num"]');
-        if (cabSel) cabSel.value = cab;
-        if (colInp) colInp.value = col;
-        if (rowInp) rowInp.value = row;
-        cabSel?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-    }
-  } catch (e) {
-    // in caso di browser vecchi senza URLSearchParams, ignoro l'errore
-  }
-});
-
-</script>
-{% endblock %}
-"""
-
-ADMIN_EDIT_TMPL = r"""\
-{% extends "base.html" %}
-{% block content %}
-<h3>Modifica articolo #{{ item.id }}</h3>
-<form method="post" class="form-section">
-  <div class="row g-2">
-    <div class="col-md-4">
-      <label class="form-label">Categoria</label>
-      <select class="form-select" name="category_id" id="catSel" required>
-        {% for c in categories %}
-          <option value="{{ c.id }}" {{ 'selected' if item.category_id==c.id else '' }}>{{ c.name }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="col-md-4">
-      <label class="form-label">Sottotipo (forma)</label>
-      <select class="form-select" name="subtype_id" id="subtypeSel">
-        <option value="">—</option>
-      </select>
-    </div>
-    <div class="col-md-4">
-      <label class="form-label">Standard</label>
-      <select class="form-select" name="thread_standard" id="stdSel">
-        <option value="M" {{ 'selected' if item.thread_standard=='M' else '' }}>Metrico</option>
-        <option value="UNC" {{ 'selected' if item.thread_standard=='UNC' else '' }}>UNC</option>
-        <option value="UNF" {{ 'selected' if item.thread_standard=='UNF' else '' }}>UNF</option>
-      </select>
-    </div>
-    <div class="col-md-4">
-      <label class="form-label">Misura</label>
-      <input class="form-control" name="thread_size" id="sizeInput" value="{{ item.thread_size or '' }}" list="sizesM">
-      <datalist id="sizesM">{% for s in metric_sizes %}<option value="{{ s }}">{% endfor %}</datalist>
-      <datalist id="sizesUNC">{% for s in unc_sizes %}<option value="{{ s }}">{% endfor %}</datalist>
-      <datalist id="sizesUNF">{% for s in unf_sizes %}<option value="{{ s }}">{% endfor %}</datalist>
-    </div>
-    <div class="col-md-4">
-      <label class="form-label">Impronta (Viti)</label>
-      <select class="form-select" name="drive" id="driveSel">
-        <option value="">—</option>
-        {% for d in drive_options %}<option value="{{ d }}" {{ 'selected' if item.drive==d else '' }}>{{ d }}</option>{% endfor %}
-      </select>
-    </div>
-    <div class="col-md-4">
-      <label class="form-label">Configurazione (Torrette)</label>
-      <select class="form-select" name="standoff_config" id="standoffSel">
-        <option value="">—</option>
-        {% for d in standoff_cfgs %}<option value="{{ d }}" {{ 'selected' if item.standoff_config==d else '' }}>{{ d }}</option>{% endfor %}
-      </select>
-    </div>
-    <div class="col-md-4">
-      <label class="form-label">Dim. principale (mm)</label>
-      <input type="number" step="0.01" class="form-control" name="main_size_mm" value="{{ item.main_size_mm or '' }}">
-    </div>
-    <div class="col-md-2 dim-washer">
-      <label class="form-label">Ø interno (mm)</label>
-      <input type="number" step="0.01" class="form-control" name="inner_d_mm" value="{{ item.inner_d_mm or '' }}">
-    </div>
-    <div class="col-md-2 dim-washer">
-      <label class="form-label">Spessore (mm)</label>
-      <input type="number" step="0.01" class="form-control" name="thickness_mm" value="{{ item.thickness_mm or '' }}">
-    </div>
-
-    <div class="col-md-6">
-      <label class="form-label">Materiale</label>
-      <select class="form-select" name="material_id">
-        <option value="">—</option>
-        {% for m in materials %}
-          <option value="{{ m.id }}" {{ 'selected' if item.material_id==m.id else '' }}>{{ m.name }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="col-md-6">
-      <label class="form-label">Finitura</label>
-      <select class="form-select" name="finish_id">
-        <option value="">—</option>
-        {% for f in finishes %}
-          <option value="{{ f.id }}" {{ 'selected' if item.finish_id==f.id else '' }}>{{ f.name }}</option>
-        {% endfor %}
-      </select>
-    </div>
-
-    <div class="col-md-12">
-      <label class="form-label">Descrizione (opz.)</label>
-      <input type="text" class="form-control" name="description" value="{{ item.description or '' }}">
-    </div>
-
-    <div class="col-md-4">
-      <label class="form-label">Quantità</label>
-      <input type="number" min="0" step="1" class="form-control" name="quantity" value="{{ item.quantity }}">
-    </div>
-
-    <div class="col-md-8">
-      <label class="form-label d-block">Campi in etichetta</label>
-      <div class="form-check form-check-inline">
-        <input class="form-check-input" type="checkbox" name="label_show_category" {{ 'checked' if item.label_show_category else '' }}>
-        <label class="form-check-label">Categoria</label>
-      </div>
-      <div class="form-check form-check-inline">
-        <input class="form-check-input" type="checkbox" name="label_show_subtype" {{ 'checked' if item.label_show_subtype else '' }}>
-        <label class="form-check-label">Sottotipo</label>
-      </div>
-      <div class="form-check form-check-inline">
-        <input class="form-check-input" type="checkbox" name="label_show_measure" {{ 'checked' if item.label_show_measure else '' }}>
-        <label class="form-check-label">Misura</label>
-      </div>
-      <div class="form-check form-check-inline">
-        <input class="form-check-input" type="checkbox" name="label_show_main" {{ 'checked' if item.label_show_main else '' }}>
-        <label class="form-check-label">Dim. principale</label>
-      </div>
-      <div class="form-check form-check-inline">
-        <input class="form-check-input" type="checkbox" name="label_show_material" {{ 'checked' if item.label_show_material else '' }}>
-        <label class="form-check-label">Materiale</label>
-      </div>
-    </div>
-
-    <div class="col-12"><hr></div>
-
-    <div class="col-md-3">
-      <label class="form-label">Posizione attuale</label>
-      <input class="form-control" value="{{ current_position or '(non assegnata)' }}" readonly>
-    </div>
-
-    <div class="col-md-3">
-      <label class="form-label">Cassettiera</label>
-      <select class="form-select" id="cabinet_id" name="cabinet_id">
-        <option value="">(scegli)</option>
-        {% for c in cabinets %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
-      </select>
-    </div>
-    <div class="col-md-2">
-      <label class="form-label">Colonna</label>
-      <input class="form-control" id="col_code" name="col_code" placeholder="es. D">
-    </div>
-    <div class="col-md-2">
-      <label class="form-label">Riga</label>
-      <input type="number" min="1" max="128" class="form-control" id="row_num" name="row_num">
-    </div>
-    <div class="col-md-2 d-flex align-items-end">
-      <button formaction="{{ url_for('set_position', item_id=item.id) }}" formmethod="post" class="btn btn-outline-primary w-100">Imposta</button>
-    </div>
-    <div class="col-md-3 d-flex align-items-end">
-      <button type="button" id="btnSuggest" class="btn btn-outline-secondary w-100">Suggerisci</button>
-    </div>
-    <div class="col-md-3 d-flex align-items-end">
-      <form method="post" action="{{ url_for('clear_position', item_id=item.id) }}" onsubmit="return confirm('Rimuovere posizione?')">
-        <button class="btn btn-outline-danger w-100">Rimuovi</button>
-      </form>
-    </div>
-
-    <div class="col-12 text-end mt-3">
-      <button class="btn btn-primary">Salva modifiche</button>
-      <a href="{{ url_for('admin_items') }}" class="btn btn-secondary">Chiudi</a>
-    </div>
-  </div>
-</form>
-
-<script>
-const SUBTYPES = {{ subtypes_by_cat|tojson }};
-const RONDELLE_ID = {{ rondelle_id or 'null' }};
-const VITI_ID = {{ viti_id or 'null' }};
-const TORRETTE_ID = {{ torrette_id or 'null' }};
-
-function populateSubtypes(catId){
-  const sel = document.getElementById('subtypeSel');
-  sel.innerHTML = '<option value="">—</option>';
-  if (!catId || !SUBTYPES[catId]) return;
-  SUBTYPES[catId].forEach(s=>{
-    const o = document.createElement('option');
-    o.value = s.id; o.textContent = s.name;
-    if ({{ item.subtype_id or 'null' }} === s.id) o.selected = true;
-    sel.appendChild(o);
-  });
-}
-function toggleSpecificFields(){
-  const catId = parseInt(document.getElementById('catSel').value || 0);
-  const isRondelle = (RONDELLE_ID && catId===RONDELLE_ID);
-  const isViti = (VITI_ID && catId===VITI_ID);
-  const isTorrette = (TORRETTE_ID && catId===TORRETTE_ID);
-  document.querySelectorAll('.dim-washer').forEach(el=> el.style.display = isRondelle ? '' : 'none');
-  document.getElementById('driveSel').closest('.col-md-4').style.display = isViti ? '' : 'none';
-  document.getElementById('standoffSel').closest('.col-md-4').style.display = isTorrette ? '' : 'none';
-}
-function switchDatalist(){
-  const std = document.getElementById('stdSel').value;
-  const inp = document.getElementById('sizeInput');
-  if (std === 'M') inp.setAttribute('list','sizesM');
-  else if (std === 'UNC') inp.setAttribute('list','sizesUNC');
-  else if (std === 'UNF') inp.setAttribute('list','sizesUNF');
-  else inp.removeAttribute('list');
-}
-
-document.addEventListener('DOMContentLoaded', ()=>{
-  populateSubtypes({{ item.category_id }});
-  toggleSpecificFields();
-  switchDatalist();
-  document.getElementById('catSel').addEventListener('change', ()=>{ populateSubtypes(parseInt(document.getElementById('catSel').value||0)); toggleSpecificFields(); });
-  document.getElementById('stdSel').addEventListener('change', switchDatalist);
-  document.getElementById('btnSuggest').addEventListener('click', async ()=>{
-    const r = await fetch('{{ url_for("suggest_position", item_id=item.id) }}');
-    const j = await r.json();
-    if (!j.ok) { alert(j.error||'Nessuna posizione trovata'); return; }
-    document.getElementById('cabinet_id').value = j.cabinet_id;
-    document.getElementById('col_code').value  = j.col_code;
-    document.getElementById('row_num').value   = j.row_num;
-  });
-});
-</script>
-{% endblock %}
-"""
-
-ADMIN_CATS_TMPL = r"""\
-{% extends "base.html" %}
-{% block content %}
-<h3>Categorie, sottotipi, materiali e finiture</h3>
-
-<div class="row">
-  <div class="col-lg-6">
-    <div class="form-section">
-      <h5 class="mb-2">Categorie</h5>
-      <table class="table table-striped" id="tblCats">
-        <thead>
-          <tr><th>ID</th><th>Nome</th><th>Colore</th><th>Azione</th></tr>
-        </thead>
-        <tbody>
-          {% for c in categories %}
-          <tr>
-            <td>{{ c.id }}</td>
-            <td>
-              <form method="post" action="{{ url_for('update_category', cat_id=c.id) }}" class="row g-2 align-items-center">
-                <div class="col-md-5">
-                  <input class="form-control" name="name" value="{{ c.name }}">
-                </div>
-                <div class="col-md-3">
-                  <input type="color" class="form-control form-control-color" name="color" value="{{ c.color }}">
-                </div>
-                <div class="col-md-4">
-                  <button class="btn btn-sm btn-primary">Salva</button>
-                  <button formaction="{{ url_for('delete_category', cat_id=c.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger" onclick="return confirm('Eliminare categoria?')">Elimina</button>
-                </div>
-              </form>
-            </td>
-            <td><span class="badge-color" style="background:{{ c.color }}"></span>{{ c.color }}</td>
-            <td></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="col-lg-6">
-    <div class="form-section">
-      <h5 class="mb-2">Nuova categoria</h5>
-      <form method="post" action="{{ url_for('add_category') }}" class="row g-2">
-        <div class="col-md-6">
-          <input class="form-control" name="name" placeholder="Nome categoria">
-        </div>
-        <div class="col-md-3">
-          <input type="color" class="form-control form-control-color" name="color" value="#607D8B">
-        </div>
-        <div class="col-md-3">
-          <button class="btn btn-primary w-100">Aggiungi</button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
-
-<hr class="my-3">
-
-<div class="form-section mb-3">
-  <h5 class="mb-2">Sottotipi (forme)</h5>
-
-  <form method="post" action="{{ url_for('add_subtype') }}" class="row g-2 mb-2">
-    <div class="col-md-4">
-      <select class="form-select" name="category_id" required>
-        <option value="">Categoria...</option>
-        {% for c in categories %}
-          <option value="{{ c.id }}">{{ c.name }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="col-md-5">
-      <input class="form-control" name="name" placeholder="Nome sottotipo (es. Testa cilindrica)">
-    </div>
-    <div class="col-md-3">
-      <button class="btn btn-primary w-100">Aggiungi</button>
-    </div>
-  </form>
-
-  <table class="table table-sm table-striped" id="tblSubtypes">
-    <thead>
-      <tr><th>ID</th><th>Categoria</th><th>Nome</th><th>Azione</th></tr>
-    </thead>
-    <tbody>
-      {% for st, c in subtypes %}
-      <tr>
-        <td>{{ st.id }}</td>
-        <td colspan="3">
-          <form method="post" action="{{ url_for('update_subtype', st_id=st.id) }}" class="row g-2 align-items-center">
-            <div class="col-md-4">
-              <select class="form-select" name="category_id">
-                {% for cat in categories %}
-                  <option value="{{ cat.id }}" {{ 'selected' if cat.id == st.category_id else '' }}>{{ cat.name }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="col-md-4">
-              <input class="form-control" name="name" value="{{ st.name }}">
-            </div>
-            <div class="col-md-4">
-              <button class="btn btn-sm btn-primary">Salva</button>
-              <button formaction="{{ url_for('delete_subtype', st_id=st.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger" onclick="return confirm('Eliminare sottotipo?')">Elimina</button>
-            </div>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
-
-<div class="row">
-  <div class="col-lg-6">
-    <div class="form-section mb-3">
-      <h5 class="mb-2">Materiali</h5>
-      <table class="table table-striped" id="tblMaterials">
-        <thead>
-          <tr><th>ID</th><th>Nome</th><th>Azione</th></tr>
-        </thead>
-        <tbody>
-          {% for m in materials %}
-          <tr>
-            <td>{{ m.id }}</td>
-            <td>
-              <form method="post" action="{{ url_for('update_material', mat_id=m.id) }}" class="row g-2 align-items-center">
-                <div class="col-md-8">
-                  <input class="form-control" name="name" value="{{ m.name }}">
-                </div>
-                <div class="col-md-4">
-                  <button class="btn btn-sm btn-primary">Salva</button>
-                  <button formaction="{{ url_for('delete_material', mat_id=m.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger" onclick="return confirm('Eliminare materiale?')">Elimina</button>
-                </div>
-              </form>
-            </td>
-            <td></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-
-    <div class="form-section">
-      <h5 class="mb-2">Nuovo materiale</h5>
-      <form method="post" action="{{ url_for('add_material') }}" class="row g-2">
-        <div class="col-md-8">
-          <input class="form-control" name="name" placeholder="Descrizione materiale">
-        </div>
-        <div class="col-md-4">
-          <button class="btn btn-primary w-100">Aggiungi</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <div class="col-lg-6">
-    <div class="form-section mb-3">
-      <h5 class="mb-2">Finiture</h5>
-      <table class="table table-striped" id="tblFinishes">
-        <thead>
-          <tr><th>ID</th><th>Nome</th><th>Azione</th></tr>
-        </thead>
-        <tbody>
-          {% for f in finishes %}
-          <tr>
-            <td>{{ f.id }}</td>
-            <td>
-              <form method="post" action="{{ url_for('update_finish', fin_id=f.id) }}" class="row g-2 align-items-center">
-                <div class="col-md-8">
-                  <input class="form-control" name="name" value="{{ f.name }}">
-                </div>
-                <div class="col-md-4">
-                  <button class="btn btn-sm btn-primary">Salva</button>
-                  <button formaction="{{ url_for('delete_finish', fin_id=f.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger" onclick="return confirm('Eliminare finitura?')">Elimina</button>
-                </div>
-              </form>
-            </td>
-            <td></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-
-    <div class="form-section">
-      <h5 class="mb-2">Nuova finitura</h5>
-      <form method="post" action="{{ url_for('add_finish') }}" class="row g-2">
-        <div class="col-md-8">
-          <input class="form-control" name="name" placeholder="Descrizione finitura">
-        </div>
-        <div class="col-md-4">
-          <button class="btn btn-primary w-100">Aggiungi</button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
-
-<script>
-$(function(){
-  if ($.fn.DataTable) {
-    $('#tblCats').DataTable({pageLength:50, order:[[0,'asc']]});
-    $('#tblSubtypes').DataTable({pageLength:50, order:[[0,'asc']]});
-    $('#tblMaterials').DataTable({pageLength:50, order:[[0,'asc']]});
-    $('#tblFinishes').DataTable({pageLength:50, order:[[0,'asc']]});
-  }
-});
-</script>
-{% endblock %}
-"""
-
-ADMIN_CONFIG_TMPL = r"""\
-{% extends "base.html" %}
-{% block content %}
-<h3>Configurazione</h3>
-<div class="row">
-  <div class="col-lg-4">
-    <div class="form-section mb-3">
-      <h5>Stampa etichette & QR</h5>
-      <form method="post" action="{{ url_for('update_settings') }}" class="row g-2">
-        <div class="col-6"><label class="form-label">Larghezza (mm)</label><input type="number" step="0.1" class="form-control" name="label_w_mm" value="{{ settings.label_w_mm }}"></div>
-        <div class="col-6"><label class="form-label">Altezza (mm)</label><input type="number" step="0.1" class="form-control" name="label_h_mm" value="{{ settings.label_h_mm }}"></div>
-        <div class="col-6"><label class="form-label">Margini top/bottom (mm)</label><input type="number" step="0.1" class="form-control" name="margin_tb_mm" value="{{ settings.margin_tb_mm }}"></div>
-        <div class="col-6"><label class="form-label">Margini sx/dx (mm)</label><input type="number" step="0.1" class="form-control" name="margin_lr_mm" value="{{ settings.margin_lr_mm }}"></div>
-        <div class="col-6"><label class="form-label">Spazio tra etichette (mm)</label><input type="number" step="0.1" class="form-control" name="gap_mm" value="{{ settings.gap_mm }}"></div>
-        <div class="col-6">
-          <label class="form-label">Orientamento</label>
-          <select class="form-select" name="orientation_landscape">
-            <option value="1" {{ 'selected' if settings.orientation_landscape else '' }}>Orizzontale</option>
-            <option value=""  {{ '' if settings.orientation_landscape else 'selected' }}>Verticale</option>
-          </select>
-        </div>
-        <div class="col-6">
-          <label class="form-label">QR attivo di default</label>
-          <select class="form-select" name="qr_default">
-            <option value="1" {{ 'selected' if settings.qr_default else '' }}>Sì</option>
-            <option value="">No</option>
-          </select>
-        </div>
-        <div class="col-12">
-          <label class="form-label">QR Base URL (opz.)</label>
-          <input class="form-control" name="qr_base_url" placeholder="https://magazzino.local" value="{{ settings.qr_base_url or '' }}">
-          <small class="text-muted">Se vuoto, uso l'host corrente.</small>
-        </div>
-        <div class="col-12 text-end mt-2"><button class="btn btn-primary">Salva impostazioni</button></div>
-      </form>
-    </div>
-  </div>
-
-  <div class="col-lg-8">
-    <div class="form-section mb-3">
-      <h5>Ubicazioni</h5>
-      <form method="post" action="{{ url_for('add_location') }}" class="row g-2 mb-2">
-        <div class="col-md-9"><input class="form-control" name="name" placeholder="Nome ubicazione"></div>
-        <div class="col-md-3"><button class="btn btn-primary w-100">Aggiungi</button></div>
-      </form>
-      <table class="table table-sm table-striped">
-        <thead><tr><th>ID</th><th>Nome</th><th>Azione</th></tr></thead>
-        <tbody>
-          {% for l in locations %}
-          <tr>
-            <td>{{ l.id }}</td>
-            <td>
-              <form method="post" action="{{ url_for('update_location', loc_id=l.id) }}" class="row g-2">
-                <div class="col-md-9"><input class="form-control" name="name" value="{{ l.name }}"></div>
-                <div class="col-md-3">
-                  <button class="btn btn-sm btn-primary">Salva</button>
-                  <button formaction="{{ url_for('delete_location', loc_id=l.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger" onclick="return confirm('Eliminare ubicazione?')">Elimina</button>
-                </div>
-              </form>
-            </td>
-            <td></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-
-    <div class="form-section">
-      <h5>Cassettiere</h5>
-      <form method="post" action="{{ url_for('add_cabinet') }}" class="row g-2 mb-2">
-        <div class="col-md-4">
-          <select class="form-select" name="location_id" required>
-            {% for l in locations %}
-              <option value="{{ l.id }}">{{ l.name }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="col-md-4"><input class="form-control" name="name" placeholder="Nome cassettiera"></div>
-        <div class="col-md-2"><input type="number" min="1" max="128" class="form-control" name="rows_max" value="128"></div>
-        <div class="col-md-1"><input class="form-control" name="cols_max" placeholder="ZZ" value="ZZ" maxlength="2"></div>
-        <div class="col-md-1"><input type="number" min="1" class="form-control" name="compartments_per_slot" value="6"></div>
-        <div class="col-md-12 text-end"><button class="btn btn-primary">Aggiungi</button></div>
-      </form>
-
-      <table class="table table-striped">
-        <thead><tr><th>ID</th><th>Ubicazione</th><th>Nome</th><th>Righe</th><th>Colonne</th><th>Comp.</th><th>Azione</th></tr></thead>
-        <tbody>
-          {% for c,l in cabinets %}
-          <tr>
-            <td>{{ c.id }}</td>
-            <td>{{ l.name }}</td>
-            <td colspan="5">
-              <form method="post" action="{{ url_for('update_cabinet', cab_id=c.id) }}" class="row g-2">
-                <div class="col-md-4"><input class="form-control" name="name" value="{{ c.name }}"></div>
-                <div class="col-md-2"><input type="number" min="1" max="128" class="form-control" name="rows_max" value="{{ c.rows_max }}"></div>
-                <div class="col-md-2"><input class="form-control" name="cols_max" value="{{ c.cols_max }}" maxlength="2"></div>
-                <div class="col-md-2"><input type="number" min="1" class="form-control" name="compartments_per_slot" value="{{ c.compartments_per_slot }}"></div>
-                <div class="col-md-2">
-                  <button class="btn btn-sm btn-primary w-100">Salva</button>
-                  <button formaction="{{ url_for('delete_cabinet', cab_id=c.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger w-100 mt-1" onclick="return confirm('Eliminare cassettiera?')">Elimina</button>
-                </div>
-              </form>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-
-      <hr>
-      <h5>Sposta / Scambia cassetti</h5>
-      <form method="post" action="{{ url_for('move_slot') }}" class="row g-2">
-        <div class="col-md-3">
-          <label class="form-label">Origine</label>
-          <select class="form-select" name="cabinet_from">
-            {% for c,l in cabinets %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
-          </select>
-        </div>
-        <div class="col-md-2"><label class="form-label">Col</label><input class="form-control" name="col_from"></div>
-        <div class="col-md-2"><label class="form-label">Riga</label><input type="number" class="form-control" name="row_from"></div>
-
-        <div class="col-md-3">
-          <label class="form-label">Destinazione</label>
-          <select class="form-select" name="cabinet_to">
-            {% for c,l in cabinets %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
-          </select>
-        </div>
-        <div class="col-md-2"><label class="form-label">Col</label><input class="form-control" name="col_to"></div>
-        <div class="col-md-2"><label class="form-label">Riga</label><input type="number" class="form-control" name="row_to"></div>
-
-        <div class="col-md-2"><label class="form-label"> </label><div class="form-check"><input class="form-check-input" type="checkbox" name="swap" id="swap"> <label class="form-check-label" for="swap">Scambia</label></div></div>
-        <div class="col-md-2 align-self-end"><button class="btn btn-primary w-100">Esegui</button></div>
-      </form>
-    </div>
-  </div>
-</div>
-{% endblock %}
-"""
-
-ADMIN_TOPLACE_TMPL = r"""\
-{% extends "base.html" %}
-{% block content %}
-<h3>Articoli da posizionare</h3>
-<div class="form-section">
-  <table class="table table-striped" id="tbl">
-    <thead><tr><th>ID</th><th>Categoria</th><th>Descrizione</th><th>Misura</th><th>Azioni</th></tr></thead>
-    <tbody>
-      {% for it in items %}
-      <tr>
-        <td>{{ it.id }}</td>
-        <td>{% if it.category %}<span class="badge-color" style="background:{{ it.category.color }}"></span>{{ it.category.name }}{% endif %}</td>
-        <td>{{ compose_caption(it) }}</td>
-        <td>{{ it.thread_size or '' }}</td>
-        <td class="text-nowrap">
-          <a href="{{ url_for('edit_item', item_id=it.id) }}" class="btn btn-sm btn-outline-primary">Modifica</a>
-          <a href="{{ url_for('admin_items') }}#grid" class="btn btn-sm btn-outline-secondary">Vai alla griglia</a>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
-<script>$(function(){ if ($.fn.DataTable) $('#tbl').DataTable({pageLength:50, order:[[1,'asc']]});});</script>
-{% endblock %}
-"""
-
-ADMIN_AUTOASSIGN_TMPL = r"""\
-{% extends "base.html" %}
-{% block content %}
-<h3>Assegnamento automatico cassettiera</h3>
-
-<div class="form-section mb-3">
-  <form method="post">
-    <div class="row g-2">
-      <div class="col-md-3">
-        <label class="form-label">Cassettiera</label>
-        <select name="cabinet_id" class="form-select" required>
-          {% for c in cabinets %}
-            <option value="{{ c.id }}" {{ 'selected' if c.id == form_cabinet_id else '' }}>{{ c.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="col-md-3">
-        <label class="form-label">Categoria</label>
-        <select name="category_id" class="form-select" required>
-          {% for c in categories %}
-            <option value="{{ c.id }}" {{ 'selected' if c.id == form_category_id else '' }}>{{ c.name }}</option>
-          {% endfor %}
-        </select>
-        {% if unplaced_count is not none %}
-          <div class="form-text">Articoli non posizionati: {{ unplaced_count }}</div>
-        {% endif %}
-      </div>
-      <div class="col-md-3">
-        <label class="form-label">Chiave primaria</label>
-        <select name="primary_key" class="form-select">
-          {% for v, label in sort_options %}
-            <option value="{{ v }}" {{ 'selected' if v == primary_key else '' }}>{{ label }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="col-md-3">
-        <label class="form-label">Chiave secondaria</label>
-        <select name="secondary_key" class="form-select">
-          <option value="">(nessuna)</option>
-          {% for v, label in sort_options %}
-            <option value="{{ v }}" {{ 'selected' if v == secondary_key else '' }}>{{ label }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="col-md-3">
-        <label class="form-label">Numero di articoli</label>
-        <input type="number" min="1" class="form-control" name="count" value="{{ count or 10 }}">
-      </div>
-      <div class="col-md-3">
-        <label class="form-label">Direzione</label>
-        <select name="direction" class="form-select">
-          <option value="H" {{ 'selected' if direction == 'H' else '' }}>Orizzontale</option>
-          <option value="V" {{ 'selected' if direction == 'V' else '' }}>Verticale</option>
-        </select>
-        <div class="form-text">Orizzontale: da sinistra a destra, poi riga successiva. Verticale: dall'alto in basso, poi colonna successiva.</div>
-      </div>
-      <div class="col-md-3">
-        <label class="form-label">Cella di partenza</label>
-        <div class="input-group">
-          <span class="input-group-text">Col</span>
-          <input type="text" class="form-control" name="start_col" id="start_col" value="{{ start_col or '' }}" maxlength="2" placeholder="es. A">
-          <span class="input-group-text">Riga</span>
-          <input type="number" class="form-control" name="start_row" id="start_row" value="{{ start_row or '' }}" min="1" max="128">
-        </div>
-        <div class="form-text">Puoi anche cliccare una cella nella griglia qui sotto.</div>
-      </div>
-      <div class="col-md-3 d-flex align-items-end">
-        <div class="form-check">
-          <input class="form-check-input" type="checkbox" value="1" id="clear_occupied" name="clear_occupied" {{ 'checked' if clear_occupied else '' }}>
-          <label class="form-check-label" for="clear_occupied">
-            De-alloca celle già popolate nel percorso
-          </label>
-        </div>
-      </div>
-      <div class="col-12 text-end">
-        <button class="btn btn-primary">Assegna automaticamente</button>
-      </div>
-    </div>
-  </form>
-</div>
-
-<h4>Griglia cassettiera</h4>
-<div class="legend mb-2">
-  <span style="background:black"></span> Bloccata
-  {% for c in categories %}
-    <span style="background:{{ c.color }}; margin-left:12px;"></span> {{ c.name }}
-  {% endfor %}
-</div>
-
-<div class="grid-wrap p-2">
-  {% if grid.rows and grid.cols %}
-  <table class="grid-table table table-sm mb-0" id="autoGrid">
-    <thead>
-      <tr>
-        <th class="rowhdr"></th>
-        {% for col in grid.cols %}
-          <th>{{ col }}</th>
-        {% endfor %}
-      </tr>
-    </thead>
-    <tbody>
-      {% for r in grid.rows %}
-      <tr>
-        <th class="rowhdr">{{ r }}</th>
-        {% for col in grid.cols %}
-          {% set key = col ~ '-' ~ r %}
-          {% set cell = grid.cells.get(key) %}
-          {% if not cell %}
-            <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="">
-              <div class="cell-inner" style="color:#777; text-shadow:none; font-weight:500;">&nbsp;</div>
-            </td>
-          {% else %}
-            {% if cell.blocked %}
-              <td class="cell-blocked" data-col="{{ col }}" data-row="{{ r }}" data-cat="blocked">
-                <div class="cell-inner">&nbsp;</div>
-              </td>
-            {% else %}
-              {% set bg = cell.entries[0].color if cell.entries else '#6c757d' %}
-              <td class="cell-used" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" style="background:{{ bg }}">
-                <div class="cell-inner">
-                  {% for e in cell.entries[:2] %}
-                    <div>{{ e.text }}</div>
-                  {% endfor %}
-                  {% if cell.entries|length > 2 %}
-                    <div>+{{ cell.entries|length-2 }}</div>
-                  {% endif %}
-                </div>
-              </td>
-            {% endif %}
-          {% endif %}
-        {% endfor %}
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-    <div class="text-muted p-3">Nessuna cassettiera selezionata.</div>
-  {% endif %}
-</div>
-
-<script>
-document.addEventListener('DOMContentLoaded', function(){
-  const grid = document.getElementById('autoGrid');
-  if (!grid) return;
-  grid.addEventListener('click', function(e){
-    const td = e.target.closest('td');
-    if (!td) return;
-    if (td.classList.contains('cell-blocked')) {
-      alert('Cella bloccata, non utilizzabile.');
-      return;
-    }
-    const col = td.dataset.col;
-    const row = td.dataset.row;
-    if (!col || !row) return;
-    document.getElementById('start_col').value = col;
-    document.getElementById('start_row').value = row;
-    grid.querySelectorAll('td').forEach(c => c.classList.remove('table-primary'));
-    td.classList.add('table-primary');
-  });
-});
-</script>
-{% endblock %}
-"""
-
-
-# Registra template
-app.jinja_loader = DictLoader({
-    "base.html": BASE_TMPL,
-    "index.html": INDEX_TMPL,
-    "login.html": LOGIN_TMPL,
-    "admin/dashboard.html": ADMIN_DASH_TMPL,
-    "admin/edit_item.html": ADMIN_EDIT_TMPL,
-    "admin/categories.html": ADMIN_CATS_TMPL,
-    "admin/config.html": ADMIN_CONFIG_TMPL,
-    "admin/to_place.html": ADMIN_TOPLACE_TMPL,
-    "admin/auto_assign.html": ADMIN_AUTOASSIGN_TMPL,
-})
-
 # ===================== INIT / MIGRAZIONI / SEED =====================
 def lite_migrations():
     con = sqlite3.connect(db_path); cur = con.cursor()
@@ -3315,6 +1804,46 @@ def lite_migrations():
                 qr_base_url TEXT
             )
         """)
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='thread_standard'")
+    if not cur.fetchone():
+        cur.execute("""
+            CREATE TABLE thread_standard (
+                id INTEGER PRIMARY KEY,
+                code TEXT NOT NULL UNIQUE,
+                label TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='thread_size'")
+    if not cur.fetchone():
+        cur.execute("""
+            CREATE TABLE thread_size (
+                id INTEGER PRIMARY KEY,
+                standard_id INTEGER NOT NULL,
+                value TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(standard_id, value),
+                FOREIGN KEY(standard_id) REFERENCES thread_standard(id)
+            )
+        """)
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='drive_option'")
+    if not cur.fetchone():
+        cur.execute("""
+            CREATE TABLE drive_option (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                sort_order INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='standoff_config_option'")
+    if not cur.fetchone():
+        cur.execute("""
+            CREATE TABLE standoff_config_option (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                sort_order INTEGER NOT NULL DEFAULT 0
+            )
+        """)
     con.commit()
     # drop legacy columns if exist (short_code, pair_code) — only schema clean if empty db; otherwise ignore
     # (nessuna drop distruttiva automatica per evitare perdita dati involontaria)
@@ -3332,6 +1861,14 @@ def seed_if_empty_or_missing():
             gap_mm=DEFAULT_GAP_MM, orientation_landscape=DEFAULT_ORIENTATION_LANDSCAPE,
             qr_default=DEFAULT_QR_DEFAULT, qr_base_url=DEFAULT_QR_BASE_URL
         ))
+    thread_standards = [
+        ("M", "Metrico", 10),
+        ("UNC", "UNC", 20),
+        ("UNF", "UNF", 30),
+    ]
+    for code, label, order in thread_standards:
+        if not ThreadStandard.query.filter_by(code=code).first():
+            db.session.add(ThreadStandard(code=code, label=label, sort_order=order))
     # categorie (con colori)
     defaults = [
         ("Viti","#2E7D32"), ("Dadi","#1565C0"), ("Rondelle","#F9A825"), ("Torrette","#6A1B9A"),
@@ -3347,6 +1884,40 @@ def seed_if_empty_or_missing():
     for f in ["Zincato bianco","Zincato nero","Brunitura","Nichelato","Grezzo","Anodizzato"]:
         if not Finish.query.filter_by(name=f).first():
             db.session.add(Finish(name=f))
+    db.session.commit()
+
+    standards_by_code = {s.code: s for s in ThreadStandard.query.all()}
+    sizes_by_standard = {
+        "M": ["M2","M2.5","M3","M4","M5","M6","M8","M10","M12","M14","M16"],
+        "UNC": ["#2-56","#4-40","#6-32","#8-32","#10-24","1/4-20","5/16-18","3/8-16","1/2-13"],
+        "UNF": ["#2-64","#4-48","#6-40","#8-36","#10-32","1/4-28","5/16-24","3/8-24","1/2-20"],
+    }
+    for code, values in sizes_by_standard.items():
+        standard = standards_by_code.get(code)
+        if not standard:
+            continue
+        for idx, value in enumerate(values, start=1):
+            exists = ThreadSize.query.filter_by(standard_id=standard.id, value=value).first()
+            if not exists:
+                db.session.add(ThreadSize(standard_id=standard.id, value=value, sort_order=idx * 10))
+
+    drive_defaults = [
+        "Taglio",
+        "Phillips (PH)",
+        "Pozidriv (PZ)",
+        "Torx (TX)",
+        "Esagonale incassato (brugola)",
+        "Robertson (quadra)",
+        "Spanner",
+    ]
+    for idx, name in enumerate(drive_defaults, start=1):
+        if not DriveOption.query.filter_by(name=name).first():
+            db.session.add(DriveOption(name=name, sort_order=idx * 10))
+
+    standoff_defaults = ["M/F", "F/F", "M/M", "Passante"]
+    for idx, name in enumerate(standoff_defaults, start=1):
+        if not StandoffConfigOption.query.filter_by(name=name).first():
+            db.session.add(StandoffConfigOption(name=name, sort_order=idx * 10))
     db.session.commit()
 
     cat = {c.name: c.id for c in Category.query.all()}

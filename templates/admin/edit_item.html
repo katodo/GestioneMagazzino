@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>Modifica articolo #{{ item.id }}</h3>
+<form method="post" class="form-section">
+  <div class="row g-2">
+    <div class="col-md-4">
+      <label class="form-label">Categoria</label>
+      <select class="form-select" name="category_id" id="catSel" required>
+        {% for c in categories %}
+          <option value="{{ c.id }}" {{ 'selected' if item.category_id==c.id else '' }}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Sottotipo (forma)</label>
+      <select class="form-select" name="subtype_id" id="subtypeSel">
+        <option value="">—</option>
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Standard</label>
+      <select class="form-select" name="thread_standard" id="stdSel">
+        {% for std in thread_standards %}
+          <option value="{{ std.code }}" {{ 'selected' if item.thread_standard==std.code else '' }}>{{ std.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Misura</label>
+      <input class="form-control" name="thread_size" id="sizeInput" value="{{ item.thread_size or '' }}" list="sizes-{{ item.thread_standard or (thread_standards[0].code if thread_standards else '') }}">
+      {% for std in thread_standards %}
+        <datalist id="sizes-{{ std.code }}">
+          {% for s in sizes_by_standard.get(std.code, []) %}<option value="{{ s }}">{% endfor %}
+        </datalist>
+      {% endfor %}
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Impronta (Viti)</label>
+      <select class="form-select" name="drive" id="driveSel">
+        <option value="">—</option>
+        {% for d in drive_options %}<option value="{{ d.name }}" {{ 'selected' if item.drive==d.name else '' }}>{{ d.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Configurazione (Torrette)</label>
+      <select class="form-select" name="standoff_config" id="standoffSel">
+        <option value="">—</option>
+        {% for d in standoff_cfgs %}<option value="{{ d.name }}" {{ 'selected' if item.standoff_config==d.name else '' }}>{{ d.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Dim. principale (mm)</label>
+      <input type="number" step="0.01" class="form-control" name="main_size_mm" value="{{ item.main_size_mm or '' }}">
+    </div>
+    <div class="col-md-2 dim-washer">
+      <label class="form-label">Ø interno (mm)</label>
+      <input type="number" step="0.01" class="form-control" name="inner_d_mm" value="{{ item.inner_d_mm or '' }}">
+    </div>
+    <div class="col-md-2 dim-washer">
+      <label class="form-label">Spessore (mm)</label>
+      <input type="number" step="0.01" class="form-control" name="thickness_mm" value="{{ item.thickness_mm or '' }}">
+    </div>
+
+    <div class="col-md-6">
+      <label class="form-label">Materiale</label>
+      <select class="form-select" name="material_id">
+        <option value="">—</option>
+        {% for m in materials %}
+          <option value="{{ m.id }}" {{ 'selected' if item.material_id==m.id else '' }}>{{ m.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Finitura</label>
+      <select class="form-select" name="finish_id">
+        <option value="">—</option>
+        {% for f in finishes %}
+          <option value="{{ f.id }}" {{ 'selected' if item.finish_id==f.id else '' }}>{{ f.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-md-12">
+      <label class="form-label">Descrizione (opz.)</label>
+      <input type="text" class="form-control" name="description" value="{{ item.description or '' }}">
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label">Quantità</label>
+      <input type="number" min="0" step="1" class="form-control" name="quantity" value="{{ item.quantity }}">
+    </div>
+
+    <div class="col-md-8">
+      <label class="form-label d-block">Campi in etichetta</label>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="checkbox" name="label_show_category" {{ 'checked' if item.label_show_category else '' }}>
+        <label class="form-check-label">Categoria</label>
+      </div>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="checkbox" name="label_show_subtype" {{ 'checked' if item.label_show_subtype else '' }}>
+        <label class="form-check-label">Sottotipo</label>
+      </div>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="checkbox" name="label_show_measure" {{ 'checked' if item.label_show_measure else '' }}>
+        <label class="form-check-label">Misura</label>
+      </div>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="checkbox" name="label_show_main" {{ 'checked' if item.label_show_main else '' }}>
+        <label class="form-check-label">Dim. principale</label>
+      </div>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="checkbox" name="label_show_material" {{ 'checked' if item.label_show_material else '' }}>
+        <label class="form-check-label">Materiale</label>
+      </div>
+    </div>
+
+    <div class="col-12"><hr></div>
+
+    <div class="col-md-3">
+      <label class="form-label">Posizione attuale</label>
+      <input class="form-control" value="{{ current_position or '(non assegnata)' }}" readonly>
+    </div>
+
+    <div class="col-md-3">
+      <label class="form-label">Cassettiera</label>
+      <select class="form-select" id="cabinet_id" name="cabinet_id">
+        <option value="">(scegli)</option>
+        {% for c in cabinets %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Colonna</label>
+      <input class="form-control" id="col_code" name="col_code" placeholder="es. D">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Riga</label>
+      <input type="number" min="1" max="128" class="form-control" id="row_num" name="row_num">
+    </div>
+    <div class="col-md-2 d-flex align-items-end">
+      <button formaction="{{ url_for('set_position', item_id=item.id) }}" formmethod="post" class="btn btn-outline-primary w-100">Imposta</button>
+    </div>
+    <div class="col-md-3 d-flex align-items-end">
+      <button type="button" id="btnSuggest" class="btn btn-outline-secondary w-100">Suggerisci</button>
+    </div>
+    <div class="col-md-3 d-flex align-items-end">
+      <form method="post" action="{{ url_for('clear_position', item_id=item.id) }}" onsubmit="return confirm('Rimuovere posizione?')">
+        <button class="btn btn-outline-danger w-100">Rimuovi</button>
+      </form>
+    </div>
+
+    <div class="col-12 text-end mt-3">
+      <button class="btn btn-primary">Salva modifiche</button>
+      <a href="{{ url_for('admin_items') }}" class="btn btn-secondary">Chiudi</a>
+    </div>
+  </div>
+</form>
+
+<script>
+const SUBTYPES = {{ subtypes_by_cat|tojson }};
+const RONDELLE_ID = {{ rondelle_id or 'null' }};
+const VITI_ID = {{ viti_id or 'null' }};
+const TORRETTE_ID = {{ torrette_id or 'null' }};
+
+function populateSubtypes(catId){
+  const sel = document.getElementById('subtypeSel');
+  sel.innerHTML = '<option value="">—</option>';
+  if (!catId || !SUBTYPES[catId]) return;
+  SUBTYPES[catId].forEach(s=>{
+    const o = document.createElement('option');
+    o.value = s.id; o.textContent = s.name;
+    if ({{ item.subtype_id or 'null' }} === s.id) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+function toggleSpecificFields(){
+  const catId = parseInt(document.getElementById('catSel').value || 0);
+  const isRondelle = (RONDELLE_ID && catId===RONDELLE_ID);
+  const isViti = (VITI_ID && catId===VITI_ID);
+  const isTorrette = (TORRETTE_ID && catId===TORRETTE_ID);
+  document.querySelectorAll('.dim-washer').forEach(el=> el.style.display = isRondelle ? '' : 'none');
+  document.getElementById('driveSel').closest('.col-md-4').style.display = isViti ? '' : 'none';
+  document.getElementById('standoffSel').closest('.col-md-4').style.display = isTorrette ? '' : 'none';
+}
+function switchDatalist(){
+  const std = document.getElementById('stdSel').value;
+  const inp = document.getElementById('sizeInput');
+  if (!std) {
+    inp.removeAttribute('list');
+    return;
+  }
+  const listId = `sizes-${std}`;
+  if (document.getElementById(listId)) {
+    inp.setAttribute('list', listId);
+  } else {
+    inp.removeAttribute('list');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', ()=>{
+  populateSubtypes({{ item.category_id }});
+  toggleSpecificFields();
+  switchDatalist();
+  document.getElementById('catSel').addEventListener('change', ()=>{ populateSubtypes(parseInt(document.getElementById('catSel').value||0)); toggleSpecificFields(); });
+  document.getElementById('stdSel').addEventListener('change', switchDatalist);
+  document.getElementById('btnSuggest').addEventListener('click', async ()=>{
+    const r = await fetch('{{ url_for("suggest_position", item_id=item.id) }}');
+    const j = await r.json();
+    if (!j.ok) { alert(j.error||'Nessuna posizione trovata'); return; }
+    document.getElementById('cabinet_id').value = j.cabinet_id;
+    document.getElementById('col_code').value  = j.col_code;
+    document.getElementById('row_num').value   = j.row_num;
+  });
+});
+</script>
+{% endblock %}

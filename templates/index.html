@@ -1,0 +1,403 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>Elenco articoli</h3>
+<form class="row g-2 mb-3">
+  <div class="col-md-3">
+    <select name="category_id" class="form-select">
+      <option value="">Tutte le categorie</option>
+      {% for c in categories %}
+        <option value="{{ c.id }}" {{ 'selected' if (request.args.get('category_id')|int)==c.id else '' }}>{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-3">
+    <select name="material_id" class="form-select">
+      <option value="">Tutti i materiali</option>
+      {% for m in materials %}
+        <option value="{{ m.id }}" {{ 'selected' if (request.args.get('material_id')|int)==m.id else '' }}>{{ m.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-3"><input type="text" name="measure" class="form-control" placeholder="Cerca misura (es. M3, 1/4-20)" value="{{ request.args.get('measure','') }}"></div>
+  <div class="col-md-3"><button class="btn btn-primary btn-sm">Filtra</button> <a href="{{ url_for('index') }}" class="btn btn-secondary btn-sm">Reset</a></div>
+</form>
+
+<table class="table table-striped table-hover" id="itemsTable">
+  <thead><tr>
+    <th>ID</th><th>Categoria</th><th>Descrizione</th><th>Misura</th>
+    <th>Dim. principale (mm)</th><th>Spessore (mm)</th><th>Materiale</th><th>Quantità</th><th>Posizione</th>
+  </tr></thead>
+  <tbody>
+    {% for item in items %}
+    <tr>
+      <td>{{ item.id }}</td>
+      <td>{% if item.category %}<span class="badge-color" style="background:{{ item.category.color }}"></span>{{ item.category.name }}{% endif %}</td>
+      <td>{{ compose_caption(item) }}</td>
+      <td>{{ item.thread_size }}</td>
+      <td>{{ '%.2f'|format(item.main_size_mm) if item.main_size_mm is not none else '' }}</td>
+      <td>{{ '%.2f'|format(item.thickness_mm) if item.thickness_mm is not none else '' }}</td>
+      <td>{{ item.material.name if item.material else '' }}</td>
+      <td>{{ item.quantity }}</td>
+      <td>{{ pos_by_item.get(item.id, '') }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<script>$(function(){ if ($.fn.DataTable) $('#itemsTable').DataTable({ pageLength: 25, order:[[1,'asc']] });});</script>
+
+<hr class="my-4">
+
+<h4>Griglia cassettiera</h4>
+<form class="row g-2 mb-2">
+  <div class="col-md-4">
+    <select name="cabinet_id" class="form-select" onchange="this.form.submit()">
+      {% for c in cabinets %}
+        <option value="{{ c.id }}" {{ 'selected' if c.id==selected_cab_id else '' }}>{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+</form>
+
+<div class="legend mb-2">
+  <span style="background:black"></span> Bloccata
+  {% for c in categories %}
+    <span style="background:{{ c.color }}; margin-left:12px;"></span> {{ c.name }}
+  {% endfor %}
+</div>
+
+<div class="grid-wrap p-2">
+  {% if grid.rows and grid.cols %}
+  <table class="grid-table" id="grid" data-cab="{{ grid.cab.id }}" data-comp="{{ grid.cab.comp }}">
+    <thead>
+      <tr>
+        <th class="rowhdr">r\\c</th>
+        {% for col in grid.cols %}
+          <th>{{ col }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in grid.rows %}
+      <tr>
+        <th class="rowhdr">{{ r }}</th>
+        {% for col in grid.cols %}
+          {% set key = col ~ '-' ~ r %}
+          {% set cell = grid.cells.get(key) %}
+          {% if not cell %}
+            <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="">
+              <div class="cell-inner" style="color:#777; text-shadow:none; font-weight:500;">&nbsp;</div>
+            </td>
+          {% else %}
+            {% if cell.blocked %}
+              <td class="cell-blocked" data-col="{{ col }}" data-row="{{ r }}" data-cat="blocked">—</td>
+            {% elif cell.entries and (cell.entries|length)>0 %}
+              {% set colhex = cell.entries[0].color %}
+              {% set texts = (cell.entries | map(attribute='text') | list) %}
+              <td class="cell-used" style="background: {{ colhex }}" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}">
+                <div class="cell-inner">
+                  {% if texts|length>0 %}<div>{{ texts[0] }}</div>{% endif %}
+                  {% if texts|length>1 %}<div>{{ texts[1] }}</div>{% endif %}
+                  {% if texts|length>2 %}<div>+{{ texts|length-2 }}</div>{% endif %}
+                </div>
+              </td>
+            {% else %}
+              <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="">
+                <div class="cell-inner" style="color:#777; text-shadow:none; font-weight:500;">&nbsp;</div>
+              </td>
+            {% endif %}
+          {% endif %}
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <div class="text-muted p-3">Configura una cassettiera per visualizzare la griglia.</div>
+  {% endif %}
+</div>
+
+{% if is_admin %}
+<!-- Modal assegnazione -->
+<div class="modal fade" id="assignModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <form id="assignForm">
+      <div class="modal-header">
+        <h5 class="modal-title">Assegna articolo a <span id="slotLabel"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Chiudi"></button>
+      </div>
+      <div class="modal-body">
+        <div class="sticky-top">
+          <div class="mb-2"><input type="text" id="flt" class="form-control" placeholder="Filtra (testo libero)"></div>
+        </div>
+        <input type="hidden" name="cabinet_id" id="cab_id" value="{{ grid.cab.id if grid.cab else '' }}">
+        <input type="hidden" name="col_code" id="col_code">
+        <input type="hidden" name="row_num" id="row_num">
+        <div class="mb-2"><small class="text-muted">Mostro solo articoli senza posizione. Se la cella è già occupata, verranno accettati solo articoli della stessa categoria.</small></div>
+        <select name="item_id" id="item_id" size="12" class="form-select">
+          {% for it in unplaced_json %}
+            <option value="{{ it.id }}" data-cat="{{ it.category_id }}">{{ it.caption }}</option>
+          {% endfor %}
+        </select>
+        <div class="mt-2"><small class="text-muted">Totale elementi: <span id="totCnt">{{ unplaced_json|length }}</span></small></div>
+        <div id="assignError" class="text-danger small mt-2 d-none"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary">Assegna</button>
+        <button type="button" class="btn btn-outline-secondary" id="btnNewItem">Nuovo articolo…</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annulla</button>
+      </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Modal contenuto cella -->
+<div class="modal fade" id="slotModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Contenuto cella <span id="slotLabel2"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Chiudi"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="slot_cab_id" value="{{ grid.cab.id if grid.cab else '' }}">
+        <input type="hidden" id="slot_col_code">
+        <input type="hidden" id="slot_row_num">
+        <div id="slotEmptyMsg" class="text-muted small d-none">Nessun articolo assegnato a questa cella.</div>
+        <table class="table table-sm align-middle mb-0" id="slotItemsTable">
+          <thead>
+            <tr><th>Articolo</th><th>Q.ta</th><th>Azioni</th></tr>
+          </thead>
+          <tbody id="slotItemsBody"></tbody>
+        </table>
+        <div id="slotError" class="text-danger small mt-2 d-none"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" id="btnSlotAdd">Aggiungi articolo senza posizione…</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Chiudi</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+
+<script>
+{% if is_admin %}
+const UNPLACED = {{ unplaced_json|tojson }};
+const CLEAR_URL_TEMPLATE = '{{ url_for("slot_clear_item", item_id=0) }}';
+
+function openAssignModal(col, row, catFilter){
+  const modal = new bootstrap.Modal(document.getElementById('assignModal'));
+  document.getElementById('slotLabel').textContent = `${col}${row}`;
+  document.getElementById('col_code').value = col;
+  document.getElementById('row_num').value = row;
+  const sel = document.getElementById('item_id');
+  sel.innerHTML = '';
+  let list = UNPLACED.slice();
+  if (catFilter) list = list.filter(x => x.category_id == parseInt(catFilter));
+  list.forEach(x=>{
+    const o = document.createElement('option');
+    o.value = x.id;
+    o.textContent = x.caption;
+    o.dataset.cat = x.category_id;
+    sel.appendChild(o);
+  });
+  document.getElementById('totCnt').textContent = list.length;
+  document.getElementById('flt').value = '';
+  document.getElementById('assignError').classList.add('d-none');
+  modal.show();
+}
+
+function openSlotModal(col, row){
+  const grid = document.getElementById('grid');
+  const cabId = document.getElementById('cab_id')?.value || grid?.dataset.cab;
+  if (!cabId) return;
+
+  const modalEl = document.getElementById('slotModal');
+  const modal = new bootstrap.Modal(modalEl);
+
+  document.getElementById('slotLabel2').textContent = `${col}${row}`;
+  document.getElementById('slot_col_code').value = col;
+  document.getElementById('slot_row_num').value = row;
+  document.getElementById('slotError').classList.add('d-none');
+  document.getElementById('slotEmptyMsg').classList.add('d-none');
+
+  const tbody = document.getElementById('slotItemsBody');
+  tbody.innerHTML = '<tr><td colspan="3"><small class="text-muted">Caricamento...</small></td></tr>';
+
+  fetch(`{{ url_for("slot_items") }}?cabinet_id=${encodeURIComponent(cabId)}&col_code=${encodeURIComponent(col)}&row_num=${encodeURIComponent(row)}`)
+    .then(r => r.json())
+    .then(j => {
+      tbody.innerHTML = '';
+      if (!j.ok) {
+        document.getElementById('slotError').textContent = j.error || 'Errore caricamento contenuto.';
+        document.getElementById('slotError').classList.remove('d-none');
+        return;
+      }
+      if (!j.items || !j.items.length) {
+        document.getElementById('slotEmptyMsg').classList.remove('d-none');
+        return;
+      }
+
+      j.items.forEach(it => {
+        const tr = document.createElement('tr');
+
+        const tdName = document.createElement('td');
+        tdName.innerHTML = `<span class="badge-color" style="background:${it.color};"></span> ${it.name}`;
+
+        const tdQty = document.createElement('td');
+        tdQty.textContent = (it.quantity !== null && it.quantity !== undefined) ? it.quantity : '';
+
+        const tdActions = document.createElement('td');
+        tdActions.className = 'text-nowrap';
+        tdActions.innerHTML = `
+          <button type="button" class="btn btn-sm btn-outline-primary me-1" data-edit-id="${it.id}">Modifica</button>
+          <button type="button" class="btn btn-sm btn-outline-danger" data-remove-id="${it.id}">Rimuovi posizione</button>
+        `;
+
+        tr.appendChild(tdName);
+        tr.appendChild(tdQty);
+        tr.appendChild(tdActions);
+        tbody.appendChild(tr);
+      });
+
+      // azioni: modifica / rimuovi
+      tbody.querySelectorAll('button[data-edit-id]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-edit-id');
+          window.location.href = '/admin/items/' + id + '/edit';
+        });
+      });
+
+    tbody.querySelectorAll('button[data-remove-id]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-remove-id');
+        if (!confirm('Rimuovere la posizione per questo articolo?')) return;
+        try {
+          const url = CLEAR_URL_TEMPLATE.replace('0', id);
+          const resp = await fetch(url, { method: 'POST' });
+          const jj = await resp.json().catch(()=>({ok:false}));
+          if (!jj.ok) {
+            alert(jj.error || 'Errore nella rimozione.');
+            return;
+          }
+          // chiudo il modal e ricarico la pagina principale
+          const modalEl = document.getElementById('slotModal');
+          const inst = bootstrap.Modal.getInstance(modalEl);
+          if (inst) inst.hide();
+          location.reload();
+        } catch (e) {
+          alert('Errore di comunicazione.');
+        }
+      });
+    });
+
+    })
+    .catch(() => {
+      tbody.innerHTML = '';
+      document.getElementById('slotError').textContent = 'Errore di comunicazione.';
+      document.getElementById('slotError').classList.remove('d-none');
+    });
+
+  modal.show();
+}
+
+document.addEventListener('DOMContentLoaded', function(){
+  const grid = document.getElementById('grid');
+  if (!grid) return;
+
+  // Click su cella:
+  //  - cella bloccata → avviso
+  //  - cella occupata → modal contenuto cella
+  //  - cella vuota    → modal assegnazione (articoli senza posizione)
+  grid.addEventListener('click', function(e){
+    const td = e.target.closest('td');
+    if (!td) return;
+    if (td.classList.contains('cell-blocked')) { alert('Cella bloccata.'); return; }
+    if (!{{ 'true' if is_admin else 'false' }}) return;
+
+    const col = td.dataset.col;
+    const row = td.dataset.row;
+    const cat = td.dataset.cat;
+
+    if (!col || !row) return;
+    if (cat === 'blocked') { alert('Cella bloccata.'); return; }
+
+    if (td.classList.contains('cell-used')) {
+      openSlotModal(col, row);
+    } else {
+      openAssignModal(col, row, cat || null);
+    }
+  });
+
+  // Filtro lista articoli non assegnati
+  document.getElementById('flt')?.addEventListener('input', function(){
+    const term = this.value.toLowerCase();
+    const sel = document.getElementById('item_id');
+    let visibleCount = 0;
+    Array.from(sel.options).forEach(opt=>{
+      const show = !term || opt.textContent.toLowerCase().includes(term);
+      opt.hidden = !show;
+      if (show) visibleCount++;
+    });
+    document.getElementById('totCnt').textContent = visibleCount;
+  });
+
+  // Submit assegnazione
+  document.getElementById('assignForm')?.addEventListener('submit', async function(ev){
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    const r = await fetch('{{ url_for("grid_assign") }}', { method:'POST', body: fd });
+    const j = await r.json().catch(()=>({ok:false, error:'Errore sconosciuto'}));
+    if (!j.ok) {
+      const el = document.getElementById('assignError');
+      el.textContent = j.error || 'Errore di assegnazione';
+      el.classList.remove('d-none');
+    } else {
+      location.reload();
+    }
+  });
+
+  // Bottone "Nuovo articolo…" → va alla pagina admin con posizione precompilata
+  const btnNewItem = document.getElementById('btnNewItem');
+  if (btnNewItem) {
+    btnNewItem.addEventListener('click', function () {
+      const cabId = document.getElementById('cab_id').value || grid.dataset.cab;
+      const col   = document.getElementById('col_code').value;
+      const row   = document.getElementById('row_num').value;
+
+      if (!cabId || !col || !row) {
+        return;
+      }
+
+      const params = new URLSearchParams({
+        new_for_cab: cabId,
+        new_for_col: col,
+        new_for_row: row
+      });
+
+      window.location.href = '{{ url_for("admin_items") }}?' + params.toString();
+    });
+  }
+
+  // Bottone nel modal contenuto cella per aggiungere articolo senza posizione
+  const btnSlotAdd = document.getElementById('btnSlotAdd');
+  if (btnSlotAdd) {
+    btnSlotAdd.addEventListener('click', function () {
+      const col = document.getElementById('slot_col_code').value;
+      const row = document.getElementById('slot_row_num').value;
+      if (!col || !row) return;
+
+      const modalEl = document.getElementById('slotModal');
+      const inst = bootstrap.Modal.getInstance(modalEl);
+      inst?.hide();
+
+      openAssignModal(col, row, null);
+    });
+  }
+});
+{% endif %}
+</script>
+{% endblock %}
