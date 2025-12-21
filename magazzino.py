@@ -83,6 +83,29 @@ class StandoffConfigOption(db.Model):
     name = db.Column(db.String(32), unique=True, nullable=False)
     sort_order = db.Column(db.Integer, nullable=False, default=0)
 
+class CustomField(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), unique=True, nullable=False)
+    field_type = db.Column(db.String(16), nullable=False, default="text")
+    options = db.Column(db.String(512), nullable=True)
+    unit = db.Column(db.String(32), nullable=True)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+
+class CategoryFieldSetting(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    category_id = db.Column(db.Integer, db.ForeignKey("category.id"), nullable=False)
+    field_key = db.Column(db.String(64), nullable=False)
+    is_enabled = db.Column(db.Boolean, nullable=False, default=True)
+    __table_args__ = (db.UniqueConstraint('category_id', 'field_key', name='uq_field_per_category'),)
+
+class ItemCustomFieldValue(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
+    field_id = db.Column(db.Integer, db.ForeignKey("custom_field.id"), nullable=False)
+    value_text = db.Column(db.String(255), nullable=True)
+    __table_args__ = (db.UniqueConstraint('item_id', 'field_id', name='uq_custom_field_value'),)
+
 class Subtype(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     category_id = db.Column(db.Integer, db.ForeignKey("category.id"), nullable=False)
@@ -245,6 +268,114 @@ def load_form_options():
         StandoffConfigOption.name,
     ).all()
     return thread_standards, sizes_by_standard, drive_options, standoff_cfgs
+
+BUILTIN_FIELD_DEFS = [
+    {"key": "subtype_id", "label": "Sottotipo (forma)"},
+    {"key": "thread_standard", "label": "Standard"},
+    {"key": "thread_size", "label": "Misura"},
+    {"key": "drive", "label": "Impronta"},
+    {"key": "standoff_config", "label": "Configurazione torrette"},
+    {"key": "main_size_mm", "label": "Dimensione principale (mm)"},
+    {"key": "inner_d_mm", "label": "Ø interno (mm)"},
+    {"key": "thickness_mm", "label": "Spessore (mm)"},
+    {"key": "material_id", "label": "Materiale"},
+    {"key": "finish_id", "label": "Finitura"},
+    {"key": "description", "label": "Descrizione"},
+    {"key": "quantity", "label": "Quantità"},
+]
+
+def custom_field_key(field_id: int) -> str:
+    return f"custom_{field_id}"
+
+def parse_custom_field_options(raw: str) -> list:
+    if not raw:
+        return []
+    lines = raw.replace(",", "\n").splitlines()
+    return [opt.strip() for opt in lines if opt.strip()]
+
+def default_fields_for_category(cat_name: str) -> set:
+    base = {
+        "subtype_id",
+        "thread_standard",
+        "thread_size",
+        "main_size_mm",
+        "material_id",
+        "finish_id",
+        "description",
+        "quantity",
+    }
+    if not cat_name:
+        return base
+    lower = cat_name.strip().lower()
+    if lower == "rondelle":
+        base.update({"inner_d_mm", "thickness_mm"})
+    if lower == "viti":
+        base.add("drive")
+    if lower == "torrette":
+        base.add("standoff_config")
+    return base
+
+def serialize_custom_fields(fields):
+    return [
+        {
+            "id": f.id,
+            "name": f.name,
+            "field_type": f.field_type,
+            "options": parse_custom_field_options(f.options),
+            "unit": f.unit,
+            "sort_order": f.sort_order,
+            "is_active": f.is_active,
+        }
+        for f in fields
+    ]
+
+def build_category_field_map(categories):
+    settings = CategoryFieldSetting.query.all()
+    enabled_by_cat = {}
+    configured_cats = set()
+    for setting in settings:
+        configured_cats.add(setting.category_id)
+        if setting.is_enabled and setting.field_key != "__none__":
+            enabled_by_cat.setdefault(setting.category_id, set()).add(setting.field_key)
+    for cat in categories:
+        if cat.id not in configured_cats:
+            enabled_by_cat[cat.id] = default_fields_for_category(cat.name)
+        elif cat.id not in enabled_by_cat:
+            enabled_by_cat[cat.id] = set()
+    return {cat_id: sorted(keys) for cat_id, keys in enabled_by_cat.items()}
+
+def build_field_definitions(custom_fields):
+    defs = [{"key": f["key"], "label": f["label"], "is_custom": False} for f in BUILTIN_FIELD_DEFS]
+    for field in custom_fields:
+        label = field["name"]
+        if field.get("unit"):
+            label = f"{label} ({field['unit']})"
+        defs.append({
+            "key": custom_field_key(field["id"]),
+            "label": f"Personalizzato: {label}",
+            "is_custom": True,
+        })
+    return defs
+
+def save_custom_field_values(item: Item, form):
+    active_fields = CustomField.query.filter_by(is_active=True).all()
+    existing = {
+        val.field_id: val
+        for val in ItemCustomFieldValue.query.filter_by(item_id=item.id).all()
+    }
+    for field in active_fields:
+        form_key = f"custom_field_{field.id}"
+        if form_key not in form:
+            continue
+        raw = (form.get(form_key) or "").strip()
+        if not raw:
+            if field.id in existing:
+                db.session.delete(existing[field.id])
+            continue
+        if field.id in existing:
+            existing[field.id].value_text = raw
+        else:
+            db.session.add(ItemCustomFieldValue(item_id=item.id, field_id=field.id, value_text=raw))
 
 # ===================== AUTH =====================
 @login_manager.user_loader
@@ -460,18 +591,13 @@ def admin_items():
         thread_standards[0].code if thread_standards else "",
     )
 
-    # ID per condizioni UI
-    viti = Category.query.filter_by(name="Viti").first()
-    torrette = Category.query.filter_by(name="Torrette").first()
-    viti_id = viti.id if viti else None
-    torrette_id = torrette.id if torrette else None
-
     subtypes_by_cat = {}
     for s in subtypes:
         subtypes_by_cat.setdefault(s.category_id, []).append({"id": s.id, "name": s.name})
 
-    rondelle = Category.query.filter_by(name="Rondelle").first()
-    rondelle_id = rondelle.id if rondelle else None
+    custom_fields = CustomField.query.filter_by(is_active=True).order_by(CustomField.sort_order, CustomField.name).all()
+    serialized_custom_fields = serialize_custom_fields(custom_fields)
+    category_fields = build_category_field_map(categories)
 
     return render_template("admin/dashboard.html",
         items=items, categories=categories, materials=materials, finishes=finishes,
@@ -480,10 +606,10 @@ def admin_items():
         thread_standards=thread_standards,
         sizes_by_standard=sizes_by_standard,
         default_standard_code=default_standard_code,
-        rondelle_id=rondelle_id,
-        viti_id=viti_id, torrette_id=torrette_id,
         drive_options=drive_options, standoff_cfgs=standoff_cfgs,
-        pos_by_item=pos_by_item
+        pos_by_item=pos_by_item,
+        custom_fields=serialized_custom_fields,
+        category_fields=category_fields
     )
 
 
@@ -522,6 +648,7 @@ def add_item():
     )
     item.name = auto_name_for(item)
     db.session.add(item); db.session.flush()
+    save_custom_field_values(item, f)
     cab_id  = f.get("cabinet_id"); row_num = f.get("row_num"); col_code = f.get("col_code")
     if cab_id and row_num and col_code:
         _assign_position(item, int(cab_id), col_code, int(row_num))
@@ -555,6 +682,7 @@ def edit_item(item_id):
         item.label_show_material = bool(f.get("label_show_material"))
         item.label_show_thread   = bool(f.get("label_show_measure"))
         item.name = auto_name_for(item)
+        save_custom_field_values(item, f)
         db.session.commit()
         flash("Articolo aggiornato", "success")
         return redirect(url_for("edit_item", item_id=item.id))
@@ -577,20 +705,22 @@ def edit_item(item_id):
            .filter(Assignment.item_id == item.id).first())
     current_position = make_full_position(pos[2].name, pos[1].col_code, pos[1].row_num) if pos else None
 
-    viti = Category.query.filter_by(name="Viti").first()
-    torrette = Category.query.filter_by(name="Torrette").first()
-    viti_id = viti.id if viti else None
-    torrette_id = torrette.id if torrette else None
-    rondelle = Category.query.filter_by(name="Rondelle").first()
-    rondelle_id = rondelle.id if rondelle else None
+    custom_fields = CustomField.query.filter_by(is_active=True).order_by(CustomField.sort_order, CustomField.name).all()
+    serialized_custom_fields = serialize_custom_fields(custom_fields)
+    custom_field_values = {
+        val.field_id: (val.value_text or "")
+        for val in ItemCustomFieldValue.query.filter_by(item_id=item.id).all()
+    }
+    category_fields = build_category_field_map(categories)
 
     return render_template("admin/edit_item.html",
         item=item, categories=categories, materials=materials, finishes=finishes,
         cabinets=cabinets, subtypes_by_cat=subtypes_by_cat,
         thread_standards=thread_standards, sizes_by_standard=sizes_by_standard,
-        rondelle_id=rondelle_id,
-        viti_id=viti_id, torrette_id=torrette_id,
-        drive_options=drive_options, standoff_cfgs=standoff_cfgs
+        drive_options=drive_options, standoff_cfgs=standoff_cfgs,
+        custom_fields=serialized_custom_fields,
+        custom_field_values=custom_field_values,
+        category_fields=category_fields
     )
 
 @app.route("/admin/items/<int:item_id>/delete", methods=["POST"])
@@ -901,7 +1031,100 @@ def delete_finish(fin_id):
 def admin_config():
     locations = Location.query.order_by(Location.name).all()
     cabinets  = db.session.query(Cabinet, Location).join(Location, Cabinet.location_id==Location.id).order_by(Cabinet.name).all()
-    return render_template("admin/config.html", locations=locations, cabinets=cabinets, settings=get_settings())
+    categories = Category.query.order_by(Category.name).all()
+    custom_fields = CustomField.query.order_by(CustomField.sort_order, CustomField.name).all()
+    serialized_custom_fields = serialize_custom_fields(custom_fields)
+    field_defs = build_field_definitions(serialized_custom_fields)
+    category_fields = build_category_field_map(categories)
+    return render_template(
+        "admin/config.html",
+        locations=locations,
+        cabinets=cabinets,
+        settings=get_settings(),
+        categories=categories,
+        custom_fields=serialized_custom_fields,
+        field_defs=field_defs,
+        category_fields=category_fields,
+    )
+
+@app.route("/admin/config/fields/<int:cat_id>/update", methods=["POST"])
+@login_required
+def update_category_fields(cat_id):
+    category = Category.query.get_or_404(cat_id)
+    selected_keys = request.form.getlist("field_keys")
+    CategoryFieldSetting.query.filter_by(category_id=category.id).delete()
+    if not selected_keys:
+        db.session.add(CategoryFieldSetting(category_id=category.id, field_key="__none__", is_enabled=False))
+    else:
+        for key in selected_keys:
+            db.session.add(CategoryFieldSetting(category_id=category.id, field_key=key, is_enabled=True))
+    db.session.commit()
+    flash(f"Campi aggiornati per {category.name}.", "success")
+    return redirect(url_for("admin_config"))
+
+@app.route("/admin/custom_fields/add", methods=["POST"])
+@login_required
+def add_custom_field():
+    name = (request.form.get("name") or "").strip()
+    field_type = (request.form.get("field_type") or "text").strip().lower()
+    options = (request.form.get("options") or "").strip() or None
+    unit = (request.form.get("unit") or "").strip() or None
+    sort_order = int(request.form.get("sort_order") or 0)
+    is_active = bool(request.form.get("is_active"))
+    if len(name) < 2:
+        return _flash_back("Nome campo troppo corto.", "danger", "admin_config")
+    if field_type not in {"text", "number", "select"}:
+        return _flash_back("Tipo campo non valido.", "danger", "admin_config")
+    if CustomField.query.filter_by(name=name).first():
+        return _flash_back("Campo personalizzato già esistente.", "danger", "admin_config")
+    db.session.add(CustomField(
+        name=name,
+        field_type=field_type,
+        options=options,
+        unit=unit,
+        sort_order=sort_order,
+        is_active=is_active,
+    ))
+    db.session.commit()
+    flash("Campo personalizzato aggiunto.", "success")
+    return redirect(url_for("admin_config"))
+
+@app.route("/admin/custom_fields/<int:field_id>/update", methods=["POST"])
+@login_required
+def update_custom_field(field_id):
+    field = CustomField.query.get_or_404(field_id)
+    name = (request.form.get("name") or "").strip()
+    field_type = (request.form.get("field_type") or "text").strip().lower()
+    options = (request.form.get("options") or "").strip() or None
+    unit = (request.form.get("unit") or "").strip() or None
+    sort_order = int(request.form.get("sort_order") or 0)
+    is_active = bool(request.form.get("is_active"))
+    if len(name) < 2:
+        return _flash_back("Nome campo troppo corto.", "danger", "admin_config")
+    if field_type not in {"text", "number", "select"}:
+        return _flash_back("Tipo campo non valido.", "danger", "admin_config")
+    if CustomField.query.filter(CustomField.id != field.id, CustomField.name == name).first():
+        return _flash_back("Esiste già un campo con questo nome.", "danger", "admin_config")
+    field.name = name
+    field.field_type = field_type
+    field.options = options
+    field.unit = unit
+    field.sort_order = sort_order
+    field.is_active = is_active
+    db.session.commit()
+    flash("Campo personalizzato aggiornato.", "success")
+    return redirect(url_for("admin_config"))
+
+@app.route("/admin/custom_fields/<int:field_id>/delete", methods=["POST"])
+@login_required
+def delete_custom_field(field_id):
+    field = CustomField.query.get_or_404(field_id)
+    ItemCustomFieldValue.query.filter_by(field_id=field.id).delete()
+    CategoryFieldSetting.query.filter_by(field_key=custom_field_key(field.id)).delete()
+    db.session.delete(field)
+    db.session.commit()
+    flash("Campo personalizzato eliminato.", "success")
+    return redirect(url_for("admin_config"))
 
 @app.route("/admin/settings/update", methods=["POST"])
 @login_required
@@ -1842,6 +2065,44 @@ def lite_migrations():
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE,
                 sort_order INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='custom_field'")
+    if not cur.fetchone():
+        cur.execute("""
+            CREATE TABLE custom_field (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                field_type TEXT NOT NULL,
+                options TEXT,
+                unit TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_active BOOLEAN NOT NULL DEFAULT 1
+            )
+        """)
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='category_field_setting'")
+    if not cur.fetchone():
+        cur.execute("""
+            CREATE TABLE category_field_setting (
+                id INTEGER PRIMARY KEY,
+                category_id INTEGER NOT NULL,
+                field_key TEXT NOT NULL,
+                is_enabled BOOLEAN NOT NULL DEFAULT 1,
+                UNIQUE(category_id, field_key),
+                FOREIGN KEY(category_id) REFERENCES category(id)
+            )
+        """)
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='item_custom_field_value'")
+    if not cur.fetchone():
+        cur.execute("""
+            CREATE TABLE item_custom_field_value (
+                id INTEGER PRIMARY KEY,
+                item_id INTEGER NOT NULL,
+                field_id INTEGER NOT NULL,
+                value_text TEXT,
+                UNIQUE(item_id, field_id),
+                FOREIGN KEY(item_id) REFERENCES item(id),
+                FOREIGN KEY(field_id) REFERENCES custom_field(id)
             )
         """)
     con.commit()

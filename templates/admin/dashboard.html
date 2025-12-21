@@ -3,60 +3,10 @@
 <h3>Articoli (Admin)</h3>
 
 <div class="form-section mb-3">
-  <form id="labelForm" method="post" action="{{ url_for('labels_pdf') }}">
-    <div class="d-flex justify-content-between align-items-center mb-2">
-      <h5 class="mb-0">Elenco</h5>
-      <div>
-        <button class="btn btn-sm btn-primary">Stampa etichette</button>
-      </div>
-    </div>
-    <table class="table table-striped table-hover" id="admItemsTable">
-      <thead>
-        <tr>
-          <th style="width:36px;"><input type="checkbox" id="chkAll"></th>
-          <th>ID</th>
-          <th>Categoria</th>
-          <th>Nome</th>
-          <th>Misura</th>
-          <th>Dim. princ. (mm)</th>
-          <th>Spessore (mm)</th>
-          <th>Materiale</th>
-          <th>Q.ta</th>
-          <th>Posizione</th>
-          <th>Azione</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for it in items %}
-        <tr>
-          <td><input type="checkbox" name="item_ids" value="{{ it.id }}"></td>
-          <td>{{ it.id }}</td>
-          <td>{% if it.category %}<span class="badge-color" style="background:{{ it.category.color }}"></span>{{ it.category.name }}{% endif %}</td>
-          <td>{{ compose_caption(it) }}</td>
-          <td>{{ it.thread_size or "" }}</td>
-          <td>{{ '%.2f'|format(it.main_size_mm) if it.main_size_mm is not none else '' }}</td>
-          <td>{{ '%.2f'|format(it.thickness_mm) if it.thickness_mm is not none else '' }}</td>
-          <td>{{ it.material.name if it.material else '' }}</td>
-          <td>{{ it.quantity }}</td>
-          <td>{{ pos_by_item.get(it.id, '') }}</td>
-          <td class="text-nowrap">
-            <a href="{{ url_for('edit_item', item_id=it.id) }}" class="btn btn-sm btn-outline-primary">Modifica</a>
-            <form method="post" action="{{ url_for('delete_item', item_id=it.id) }}" class="d-inline" onsubmit="return confirm('Eliminare articolo?')">
-              <button class="btn btn-sm btn-outline-danger">Elimina</button>
-            </form>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </form>
-</div>
-
-<div class="form-section">
   <h5 class="mb-2">Nuovo articolo</h5>
   <form method="post" action="{{ url_for('add_item') }}">
     <div class="row g-2">
-      <div class="col-md-6">
+      <div class="col-md-6 field-block" data-field-key="category_id">
         <label class="form-label">Categoria</label>
         <select class="form-select" name="category_id" id="catSel" required>
           <option value="">—</option>
@@ -65,14 +15,14 @@
           {% endfor %}
         </select>
       </div>
-      <div class="col-md-6">
+      <div class="col-md-6 field-block" data-field-key="subtype_id">
         <label class="form-label">Sottotipo (forma)</label>
         <select class="form-select" name="subtype_id" id="subtypeSel">
           <option value="">—</option>
         </select>
       </div>
 
-      <div class="col-md-4">
+      <div class="col-md-4 field-block" data-field-key="thread_standard">
         <label class="form-label">Standard</label>
         <select class="form-select" name="thread_standard" id="stdSel">
           {% for std in thread_standards %}
@@ -80,7 +30,7 @@
           {% endfor %}
         </select>
       </div>
-      <div class="col-md-8">
+      <div class="col-md-8 field-block" data-field-key="thread_size">
         <label class="form-label">Misura (es. M3 / 1/4-20)</label>
         <input class="form-control" name="thread_size" id="sizeInput" list="sizes-{{ default_standard_code }}">
         {% for std in thread_standards %}
@@ -90,14 +40,14 @@
         {% endfor %}
       </div>
 
-      <div class="col-md-4">
+      <div class="col-md-4 field-block" data-field-key="drive">
         <label class="form-label">Impronta (Viti)</label>
         <select class="form-select" name="drive" id="driveSel">
           <option value="">—</option>
           {% for d in drive_options %}<option value="{{ d.name }}">{{ d.name }}</option>{% endfor %}
         </select>
       </div>
-      <div class="col-md-4">
+      <div class="col-md-4 field-block" data-field-key="standoff_config">
         <label class="form-label">Configurazione (Torrette)</label>
         <select class="form-select" name="standoff_config" id="standoffSel">
           <option value="">—</option>
@@ -105,27 +55,27 @@
         </select>
       </div>
 
-      <div class="col-md-4">
+      <div class="col-md-4 field-block" data-field-key="main_size_mm">
         <label class="form-label">Dimensione principale (mm)</label>
         <input type="number" step="0.01" class="form-control" name="main_size_mm" placeholder="L (viti/torrette) o Øe (rondelle)">
       </div>
-      <div class="col-md-3 dim-washer">
+      <div class="col-md-3 field-block" data-field-key="inner_d_mm">
         <label class="form-label">Ø interno (mm)</label>
         <input type="number" step="0.01" class="form-control" name="inner_d_mm">
       </div>
-      <div class="col-md-3 dim-washer">
+      <div class="col-md-3 field-block" data-field-key="thickness_mm">
         <label class="form-label">Spessore (mm)</label>
         <input type="number" step="0.01" class="form-control" name="thickness_mm">
       </div>
 
-      <div class="col-md-6">
+      <div class="col-md-6 field-block" data-field-key="material_id">
         <label class="form-label">Materiale</label>
         <select class="form-select" name="material_id">
           <option value="">—</option>
           {% for m in materials %}<option value="{{ m.id }}">{{ m.name }}</option>{% endfor %}
         </select>
       </div>
-      <div class="col-md-6">
+      <div class="col-md-6 field-block" data-field-key="finish_id">
         <label class="form-label">Finitura</label>
         <select class="form-select" name="finish_id">
           <option value="">—</option>
@@ -133,12 +83,35 @@
         </select>
       </div>
 
-      <div class="col-md-12">
+      <div class="col-md-12 field-block" data-field-key="description">
         <label class="form-label">Descrizione (opz.)</label>
         <input type="text" class="form-control" name="description">
       </div>
 
-      <div class="col-md-4">
+      {% if custom_fields %}
+      <div class="col-12">
+        <label class="form-label d-block">Campi personalizzati</label>
+      </div>
+      {% for field in custom_fields %}
+      <div class="col-md-6 field-block" data-field-key="custom_{{ field.id }}">
+        <label class="form-label">{{ field.name }}{% if field.unit %} ({{ field.unit }}){% endif %}</label>
+        {% if field.field_type == 'select' %}
+          <select class="form-select" name="custom_field_{{ field.id }}">
+            <option value="">—</option>
+            {% for opt in field.options %}
+              <option value="{{ opt }}">{{ opt }}</option>
+            {% endfor %}
+          </select>
+        {% elif field.field_type == 'number' %}
+          <input type="number" step="0.01" class="form-control" name="custom_field_{{ field.id }}">
+        {% else %}
+          <input type="text" class="form-control" name="custom_field_{{ field.id }}">
+        {% endif %}
+      </div>
+      {% endfor %}
+      {% endif %}
+
+      <div class="col-md-4 field-block" data-field-key="quantity">
         <label class="form-label">Quantità</label>
         <input type="number" min="0" step="1" class="form-control" name="quantity" value="0">
       </div>
@@ -192,11 +165,59 @@
   </form>
 </div>
 
+<div class="form-section mb-3">
+  <form id="labelForm" method="post" action="{{ url_for('labels_pdf') }}">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h5 class="mb-0">Elenco</h5>
+      <div>
+        <button class="btn btn-sm btn-primary">Stampa etichette</button>
+      </div>
+    </div>
+    <table class="table table-striped table-hover" id="admItemsTable">
+      <thead>
+        <tr>
+          <th style="width:36px;"><input type="checkbox" id="chkAll"></th>
+          <th>ID</th>
+          <th>Categoria</th>
+          <th>Nome</th>
+          <th>Misura</th>
+          <th>Dim. princ. (mm)</th>
+          <th>Spessore (mm)</th>
+          <th>Materiale</th>
+          <th>Q.ta</th>
+          <th>Posizione</th>
+          <th>Azione</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for it in items %}
+        <tr>
+          <td><input type="checkbox" name="item_ids" value="{{ it.id }}"></td>
+          <td>{{ it.id }}</td>
+          <td>{% if it.category %}<span class="badge-color" style="background:{{ it.category.color }}"></span>{{ it.category.name }}{% endif %}</td>
+          <td>{{ compose_caption(it) }}</td>
+          <td>{{ it.thread_size or "" }}</td>
+          <td>{{ '%.2f'|format(it.main_size_mm) if it.main_size_mm is not none else '' }}</td>
+          <td>{{ '%.2f'|format(it.thickness_mm) if it.thickness_mm is not none else '' }}</td>
+          <td>{{ it.material.name if it.material else '' }}</td>
+          <td>{{ it.quantity }}</td>
+          <td>{{ pos_by_item.get(it.id, '') }}</td>
+          <td class="text-nowrap">
+            <a href="{{ url_for('edit_item', item_id=it.id) }}" class="btn btn-sm btn-outline-primary">Modifica</a>
+            <form method="post" action="{{ url_for('delete_item', item_id=it.id) }}" class="d-inline" onsubmit="return confirm('Eliminare articolo?')">
+              <button class="btn btn-sm btn-outline-danger">Elimina</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </form>
+</div>
+
 <script>
 const SUBTYPES = {{ subtypes_by_cat|tojson }};
-const RONDELLE_ID = {{ rondelle_id or 'null' }};
-const VITI_ID = {{ viti_id or 'null' }};
-const TORRETTE_ID = {{ torrette_id or 'null' }};
+const CATEGORY_FIELDS = {{ category_fields|tojson }};
 
 function populateSubtypes(catId, targetSelId){
   const sel = document.getElementById(targetSelId);
@@ -208,14 +229,20 @@ function populateSubtypes(catId, targetSelId){
     sel.appendChild(o);
   });
 }
-function toggleSpecificFields(){
-  const catId = parseInt(document.getElementById('catSel').value || 0);
-  const isRondelle = (RONDELLE_ID && catId===RONDELLE_ID);
-  const isViti = (VITI_ID && catId===VITI_ID);
-  const isTorrette = (TORRETTE_ID && catId===TORRETTE_ID);
-  document.querySelectorAll('.dim-washer').forEach(el=> el.style.display = isRondelle ? '' : 'none');
-  document.getElementById('driveSel').closest('.col-md-4').style.display = isViti ? '' : 'none';
-  document.getElementById('standoffSel').closest('.col-md-4').style.display = isTorrette ? '' : 'none';
+function applyFieldVisibility(catId){
+  if (!catId || !CATEGORY_FIELDS[catId]) {
+    document.querySelectorAll('[data-field-key]').forEach(el=>{ el.style.display = ''; });
+    return;
+  }
+  const enabled = new Set(CATEGORY_FIELDS[catId]);
+  document.querySelectorAll('[data-field-key]').forEach(el=>{
+    const key = el.dataset.fieldKey;
+    if (key === 'category_id') {
+      el.style.display = '';
+      return;
+    }
+    el.style.display = enabled.has(key) ? '' : 'none';
+  });
 }
 function switchDatalist(stdSelId, inputId){
   const std = document.getElementById(stdSelId).value;
@@ -237,10 +264,11 @@ document.addEventListener('DOMContentLoaded', ()=>{
   document.getElementById('chkAll')?.addEventListener('change', (e)=>{
     document.querySelectorAll('input[name="item_ids"]').forEach(cb=> cb.checked = e.target.checked);
   });
-  toggleSpecificFields();
+  applyFieldVisibility(parseInt(document.getElementById('catSel').value || 0));
   document.getElementById('catSel').addEventListener('change', e=>{
-    populateSubtypes(parseInt(e.target.value||0), 'subtypeSel');
-    toggleSpecificFields();
+    const catId = parseInt(e.target.value||0);
+    populateSubtypes(catId, 'subtypeSel');
+    applyFieldVisibility(catId);
   });
   document.getElementById('stdSel').addEventListener('change', ()=>switchDatalist('stdSel','sizeInput'));
 
