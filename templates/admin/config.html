@@ -2,6 +2,45 @@
 {% block content %}
 <h3>Configurazione</h3>
 <div class="row g-3">
+  <div class="col-xl-8">
+    <div class="form-section">
+      <h5>Campi per categoria</h5>
+      <p class="text-muted mb-2">Seleziona i campi visibili per ogni categoria (inserimento e modifica articoli).</p>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th style="width:180px;">Categoria</th>
+              {% for field in field_defs %}
+              <th class="text-center">{{ field.label }}</th>
+              {% endfor %}
+              <th style="width:90px;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for cat in categories %}
+            <tr>
+              <td class="fw-semibold">{{ cat.name }}</td>
+              {% for field in field_defs %}
+              <td class="text-center">
+                <div class="form-check d-flex justify-content-center m-0">
+                  <input class="form-check-input" type="checkbox" name="field_keys" value="{{ field.key }}" id="field-{{ cat.id }}-{{ field.key }}" form="cat-fields-{{ cat.id }}" {{ 'checked' if field.key in category_fields.get(cat.id, []) else '' }}>
+                </div>
+              </td>
+              {% endfor %}
+              <td class="text-end">
+                <form method="post" action="{{ url_for('update_category_fields', cat_id=cat.id) }}" id="cat-fields-{{ cat.id }}">
+                  <button class="btn btn-sm btn-primary">Salva</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <div class="col-xl-4">
     <div class="form-section h-100">
       <h5>Stampa etichette & QR</h5>
@@ -32,49 +71,6 @@
         </div>
         <div class="col-12 text-end mt-2"><button class="btn btn-primary">Salva impostazioni</button></div>
       </form>
-    </div>
-  </div>
-
-  <div class="col-xl-8">
-    <div class="form-section">
-      <h5>Campi per categoria</h5>
-      <p class="text-muted mb-2">Seleziona i campi visibili per ogni categoria (inserimento e modifica articoli).</p>
-      <div class="table-responsive">
-        <table class="table table-sm align-middle">
-          <thead>
-            <tr>
-              <th style="width:160px;">Categoria</th>
-              <th>Campi disponibili</th>
-              <th style="width:90px;"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for cat in categories %}
-            <tr>
-              <td class="fw-semibold">{{ cat.name }}</td>
-              <td>
-                <form method="post" action="{{ url_for('update_category_fields', cat_id=cat.id) }}" class="row g-2">
-                  <div class="col-12">
-                    <div class="d-flex flex-wrap gap-2">
-                      {% for field in field_defs %}
-                        <div class="form-check form-check-inline">
-                          <input class="form-check-input" type="checkbox" name="field_keys" value="{{ field.key }}" id="field-{{ cat.id }}-{{ field.key }}" {{ 'checked' if field.key in category_fields.get(cat.id, []) else '' }}>
-                          <label class="form-check-label" for="field-{{ cat.id }}-{{ field.key }}">{{ field.label }}</label>
-                        </div>
-                      {% endfor %}
-                    </div>
-                  </div>
-                  <div class="col-12 text-end">
-                    <button class="btn btn-sm btn-primary">Salva</button>
-                  </div>
-                </form>
-              </td>
-              <td></td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
     </div>
   </div>
 
@@ -210,16 +206,29 @@
       <h5>Cassettiere</h5>
       <form method="post" action="{{ url_for('add_cabinet') }}" class="row g-2 mb-2">
         <div class="col-md-4">
+          <label class="form-label small text-muted mb-1">Ubicazione</label>
           <select class="form-select" name="location_id" required>
             {% for l in locations %}
               <option value="{{ l.id }}">{{ l.name }}</option>
             {% endfor %}
           </select>
         </div>
-        <div class="col-md-4"><input class="form-control" name="name" placeholder="Nome cassettiera"></div>
-        <div class="col-md-2"><input type="number" min="1" max="128" class="form-control" name="rows_max" value="128"></div>
-        <div class="col-md-1"><input class="form-control" name="cols_max" placeholder="ZZ" value="ZZ" maxlength="2"></div>
-        <div class="col-md-1"><input type="number" min="1" class="form-control" name="compartments_per_slot" value="6"></div>
+        <div class="col-md-4">
+          <label class="form-label small text-muted mb-1">Nome</label>
+          <input class="form-control" name="name" placeholder="Nome cassettiera">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small text-muted mb-1">Righe</label>
+          <input type="number" min="1" max="128" class="form-control" name="rows_max" value="128">
+        </div>
+        <div class="col-md-1">
+          <label class="form-label small text-muted mb-1">Colonne</label>
+          <input class="form-control" name="cols_max" placeholder="ZZ" value="ZZ" maxlength="2">
+        </div>
+        <div class="col-md-1">
+          <label class="form-label small text-muted mb-1">Comp.</label>
+          <input type="number" min="1" class="form-control" name="compartments_per_slot" value="6">
+        </div>
         <div class="col-md-12 text-end"><button class="btn btn-primary">Aggiungi</button></div>
       </form>
 
@@ -230,17 +239,24 @@
           <tr>
             <td>{{ c.id }}</td>
             <td>{{ l.name }}</td>
-            <td colspan="5">
-              <form method="post" action="{{ url_for('update_cabinet', cab_id=c.id) }}" class="row g-2">
-                <div class="col-md-4"><input class="form-control" name="name" value="{{ c.name }}"></div>
-                <div class="col-md-2"><input type="number" min="1" max="128" class="form-control" name="rows_max" value="{{ c.rows_max }}"></div>
-                <div class="col-md-2"><input class="form-control" name="cols_max" value="{{ c.cols_max }}" maxlength="2"></div>
-                <div class="col-md-2"><input type="number" min="1" class="form-control" name="compartments_per_slot" value="{{ c.compartments_per_slot }}"></div>
-                <div class="col-md-2">
-                  <button class="btn btn-sm btn-primary w-100">Salva</button>
-                  <button formaction="{{ url_for('delete_cabinet', cab_id=c.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger w-100 mt-1" onclick="return confirm('Eliminare cassettiera?')">Elimina</button>
-                </div>
-              </form>
+            <td>
+              <input class="form-control" name="name" value="{{ c.name }}" form="cabinet-form-{{ c.id }}">
+            </td>
+            <td>
+              <input type="number" min="1" max="128" class="form-control" name="rows_max" value="{{ c.rows_max }}" form="cabinet-form-{{ c.id }}">
+            </td>
+            <td>
+              <input class="form-control" name="cols_max" value="{{ c.cols_max }}" maxlength="2" form="cabinet-form-{{ c.id }}">
+            </td>
+            <td>
+              <input type="number" min="1" class="form-control" name="compartments_per_slot" value="{{ c.compartments_per_slot }}" form="cabinet-form-{{ c.id }}">
+            </td>
+            <td class="text-end">
+              <form method="post" action="{{ url_for('update_cabinet', cab_id=c.id) }}" id="cabinet-form-{{ c.id }}" class="d-grid gap-1"></form>
+              <div class="d-grid gap-1">
+                <button class="btn btn-sm btn-primary" form="cabinet-form-{{ c.id }}">Salva</button>
+                <button formaction="{{ url_for('delete_cabinet', cab_id=c.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger" onclick="return confirm('Eliminare cassettiera?')" form="cabinet-form-{{ c.id }}">Elimina</button>
+              </div>
             </td>
           </tr>
           {% endfor %}
