@@ -6,10 +6,12 @@ cd magazzino
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-python app.py
+python magazzino.py
 ```
 
 Apri `http://localhost:5000`.
+
+- In alternativa puoi usare lo script `start.sh` che crea/attiva il virtualenv, installa le dipendenze e avvia l'app.
 
 - Admin: `http://localhost:5000/login` (utente: `admin`, password: `admin`).
 - Il DB SQLite è salvato in `instance/magazzino.db`.
@@ -28,3 +30,10 @@ Apri `http://localhost:5000`.
 - È pre-caricata una Ubicazione “Parete A (PA)” e una Cassettiera “Cassettiera 1 (pair_code AA)”. Puoi crearne altre in una versione successiva.
 - Le colonne accettano **A..Z** e **AA..ZZ**; righe 1..128.
 - Uno **slot** può contenere più articoli **della stessa categoria** (viene usato il primo scomparto libero).
+
+## Importazione database da versione precedente
+1. **Ferma l'app** se è in esecuzione.
+2. **Fai un backup** dell'attuale `instance/magazzino.db`.
+3. Copia il database della versione precedente in `instance/magazzino.db`.
+4. Avvia l'app con `./start.sh` oppure `python magazzino.py`.
+   All'avvio vengono eseguite automaticamente le migrazioni leggere per aggiungere eventuali colonne mancanti.
