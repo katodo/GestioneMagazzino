@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h3>Modifica articolo #{{ item.id }}</h3>
-<form method="post" class="form-section">
+<form method="post" class="form-section needs-validation" novalidate>
   <div class="row g-2">
     <div class="col-md-4 field-block" data-field-key="category_id">
       <label class="form-label">Categoria</label>
@@ -10,6 +10,7 @@
           <option value="{{ c.id }}" {{ 'selected' if item.category_id==c.id else '' }}>{{ c.name }}</option>
         {% endfor %}
       </select>
+      <div class="invalid-feedback">Seleziona una categoria.</div>
     </div>
     <div class="col-md-4 field-block" data-field-key="subtype_id">
       <label class="form-label">Sottotipo (forma)</label>
