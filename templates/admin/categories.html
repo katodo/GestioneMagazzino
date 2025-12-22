@@ -57,6 +57,102 @@
 
 <hr class="my-3">
 
+<div class="row">
+  <div class="col-lg-6">
+    <div class="form-section mb-3">
+      <h5 class="mb-2">Impronta (Viti)</h5>
+      <table class="table table-striped" id="tblDrives">
+        <thead>
+          <tr><th>ID</th><th>Nome</th><th>Ordine</th><th>Azione</th></tr>
+        </thead>
+        <tbody>
+          {% for d in drive_options %}
+          <tr>
+            <td>{{ d.id }}</td>
+            <td>
+              <input class="form-control" name="name" value="{{ d.name }}" form="drive-form-{{ d.id }}">
+            </td>
+            <td>
+              <input type="number" class="form-control" name="sort_order" value="{{ d.sort_order }}" form="drive-form-{{ d.id }}">
+            </td>
+            <td class="text-end">
+              <form method="post" action="{{ url_for('update_drive_option', opt_id=d.id) }}" id="drive-form-{{ d.id }}" class="d-grid gap-1"></form>
+              <div class="d-grid gap-1">
+                <button class="btn btn-sm btn-primary" form="drive-form-{{ d.id }}">Salva</button>
+                <button formaction="{{ url_for('delete_drive_option', opt_id=d.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger" onclick="return confirm('Eliminare impronta?')" form="drive-form-{{ d.id }}">Elimina</button>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="form-section">
+      <h5 class="mb-2">Nuova impronta (Viti)</h5>
+      <form method="post" action="{{ url_for('add_drive_option') }}" class="row g-2">
+        <div class="col-md-6">
+          <input class="form-control" name="name" placeholder="Nome impronta">
+        </div>
+        <div class="col-md-3">
+          <input type="number" class="form-control" name="sort_order" value="0">
+        </div>
+        <div class="col-md-3">
+          <button class="btn btn-primary w-100">Aggiungi</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="form-section mb-3">
+      <h5 class="mb-2">Configurazione (Torrette)</h5>
+      <table class="table table-striped" id="tblStandoffCfgs">
+        <thead>
+          <tr><th>ID</th><th>Nome</th><th>Ordine</th><th>Azione</th></tr>
+        </thead>
+        <tbody>
+          {% for s in standoff_cfgs %}
+          <tr>
+            <td>{{ s.id }}</td>
+            <td>
+              <input class="form-control" name="name" value="{{ s.name }}" form="standoff-form-{{ s.id }}">
+            </td>
+            <td>
+              <input type="number" class="form-control" name="sort_order" value="{{ s.sort_order }}" form="standoff-form-{{ s.id }}">
+            </td>
+            <td class="text-end">
+              <form method="post" action="{{ url_for('update_standoff_config', opt_id=s.id) }}" id="standoff-form-{{ s.id }}" class="d-grid gap-1"></form>
+              <div class="d-grid gap-1">
+                <button class="btn btn-sm btn-primary" form="standoff-form-{{ s.id }}">Salva</button>
+                <button formaction="{{ url_for('delete_standoff_config', opt_id=s.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger" onclick="return confirm('Eliminare configurazione?')" form="standoff-form-{{ s.id }}">Elimina</button>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="form-section">
+      <h5 class="mb-2">Nuova configurazione (Torrette)</h5>
+      <form method="post" action="{{ url_for('add_standoff_config') }}" class="row g-2">
+        <div class="col-md-6">
+          <input class="form-control" name="name" placeholder="Nome configurazione">
+        </div>
+        <div class="col-md-3">
+          <input type="number" class="form-control" name="sort_order" value="0">
+        </div>
+        <div class="col-md-3">
+          <button class="btn btn-primary w-100">Aggiungi</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<hr class="my-3">
+
 <div class="form-section mb-3">
   <h5 class="mb-2">Sottotipi (forme)</h5>
 
@@ -202,6 +298,8 @@ $(function(){
     $('#tblSubtypes').DataTable({pageLength:50, order:[[0,'asc']]});
     $('#tblMaterials').DataTable({pageLength:50, order:[[0,'asc']]});
     $('#tblFinishes').DataTable({pageLength:50, order:[[0,'asc']]});
+    $('#tblDrives').DataTable({pageLength:50, order:[[0,'asc']]});
+    $('#tblStandoffCfgs').DataTable({pageLength:50, order:[[0,'asc']]});
   }
 });
 </script>

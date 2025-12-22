@@ -1000,6 +1000,11 @@ def admin_categories():
     categories = Category.query.order_by(Category.name).all()
     materials  = Material.query.order_by(Material.name).all()
     finishes   = Finish.query.order_by(Finish.name).all()
+    drive_options = DriveOption.query.order_by(DriveOption.sort_order, DriveOption.name).all()
+    standoff_cfgs = StandoffConfigOption.query.order_by(
+        StandoffConfigOption.sort_order,
+        StandoffConfigOption.name,
+    ).all()
     # elenco sottotipi con categoria associata (per mostrare ed editare)
     subtypes   = (
         db.session.query(Subtype, Category)
@@ -1012,6 +1017,8 @@ def admin_categories():
         categories=categories,
         materials=materials,
         finishes=finishes,
+        drive_options=drive_options,
+        standoff_cfgs=standoff_cfgs,
         subtypes=subtypes,
     )
 
@@ -1208,6 +1215,100 @@ def delete_finish(fin_id):
         db.session.delete(fin)
         db.session.commit()
         flash("Finitura eliminata.", "success")
+    return redirect(url_for("admin_categories"))
+
+@app.route("/admin/drive_options/add", methods=["POST"])
+@login_required
+def add_drive_option():
+    name = (request.form.get("name") or "").strip()
+    sort_order = int(request.form.get("sort_order") or 0)
+    if len(name) < 2:
+        return _flash_back("Nome impronta troppo corto.", "danger", "admin_categories")
+    if DriveOption.query.filter_by(name=name).first():
+        return _flash_back("Impronta già esistente.", "danger", "admin_categories")
+
+    db.session.add(DriveOption(name=name, sort_order=sort_order))
+    db.session.commit()
+    flash("Impronta aggiunta.", "success")
+    return redirect(url_for("admin_categories"))
+
+
+@app.route("/admin/drive_options/<int:opt_id>/update", methods=["POST"])
+@login_required
+def update_drive_option(opt_id):
+    opt = DriveOption.query.get_or_404(opt_id)
+    name = (request.form.get("name") or "").strip()
+    sort_order = int(request.form.get("sort_order") or opt.sort_order)
+    if len(name) < 2:
+        return _flash_back("Nome impronta troppo corto.", "danger", "admin_categories")
+    if DriveOption.query.filter(DriveOption.id != opt.id, DriveOption.name == name).first():
+        return _flash_back("Esiste già un'impronta con questo nome.", "danger", "admin_categories")
+
+    opt.name = name
+    opt.sort_order = sort_order
+    db.session.commit()
+    flash("Impronta aggiornata.", "success")
+    return redirect(url_for("admin_categories"))
+
+
+@app.route("/admin/drive_options/<int:opt_id>/delete", methods=["POST"])
+@login_required
+def delete_drive_option(opt_id):
+    opt = DriveOption.query.get_or_404(opt_id)
+    used = Item.query.filter_by(drive=opt.name).first()
+    if used:
+        flash("Impossibile eliminare: ci sono articoli che usano questa impronta.", "danger")
+    else:
+        db.session.delete(opt)
+        db.session.commit()
+        flash("Impronta eliminata.", "success")
+    return redirect(url_for("admin_categories"))
+
+@app.route("/admin/standoff_configs/add", methods=["POST"])
+@login_required
+def add_standoff_config():
+    name = (request.form.get("name") or "").strip()
+    sort_order = int(request.form.get("sort_order") or 0)
+    if len(name) < 2:
+        return _flash_back("Nome configurazione troppo corto.", "danger", "admin_categories")
+    if StandoffConfigOption.query.filter_by(name=name).first():
+        return _flash_back("Configurazione già esistente.", "danger", "admin_categories")
+
+    db.session.add(StandoffConfigOption(name=name, sort_order=sort_order))
+    db.session.commit()
+    flash("Configurazione aggiunta.", "success")
+    return redirect(url_for("admin_categories"))
+
+
+@app.route("/admin/standoff_configs/<int:opt_id>/update", methods=["POST"])
+@login_required
+def update_standoff_config(opt_id):
+    opt = StandoffConfigOption.query.get_or_404(opt_id)
+    name = (request.form.get("name") or "").strip()
+    sort_order = int(request.form.get("sort_order") or opt.sort_order)
+    if len(name) < 2:
+        return _flash_back("Nome configurazione troppo corto.", "danger", "admin_categories")
+    if StandoffConfigOption.query.filter(StandoffConfigOption.id != opt.id, StandoffConfigOption.name == name).first():
+        return _flash_back("Esiste già una configurazione con questo nome.", "danger", "admin_categories")
+
+    opt.name = name
+    opt.sort_order = sort_order
+    db.session.commit()
+    flash("Configurazione aggiornata.", "success")
+    return redirect(url_for("admin_categories"))
+
+
+@app.route("/admin/standoff_configs/<int:opt_id>/delete", methods=["POST"])
+@login_required
+def delete_standoff_config(opt_id):
+    opt = StandoffConfigOption.query.get_or_404(opt_id)
+    used = Item.query.filter_by(standoff_config=opt.name).first()
+    if used:
+        flash("Impossibile eliminare: ci sono articoli che usano questa configurazione.", "danger")
+    else:
+        db.session.delete(opt)
+        db.session.commit()
+        flash("Configurazione eliminata.", "success")
     return redirect(url_for("admin_categories"))
 
 # ===================== ADMIN: CONFIGURAZIONE =====================
