@@ -350,9 +350,8 @@ BUILTIN_FIELD_DEFS = [
     {"key": "drive", "label": "Impronta"},
     {"key": "standoff_config", "label": "Configurazione torrette"},
     {"key": "outer_d_mm", "label": "Ø esterno (mm)"},
-    {"key": "length_mm", "label": "Lunghezza (mm)"},
+    {"key": "length_mm", "label": "Lunghezza/Spessore (mm)"},
     {"key": "inner_d_mm", "label": "Ø interno (mm)"},
-    {"key": "thickness_mm", "label": "Spessore (mm)"},
     {"key": "material_id", "label": "Materiale"},
     {"key": "finish_id", "label": "Finitura"},
     {"key": "description", "label": "Descrizione"},
@@ -387,7 +386,7 @@ def default_fields_for_category(cat_name: str) -> set:
     else:
         base.add("outer_d_mm")
     if lower == "rondelle":
-        base.update({"inner_d_mm", "thickness_mm"})
+        base.update({"inner_d_mm", "length_mm"})
     if lower == "viti":
         base.add("drive")
     if lower == "torrette":
@@ -416,6 +415,9 @@ def build_category_field_map(categories):
         configured_cats.add(setting.category_id)
         if setting.is_enabled and setting.field_key != "__none__":
             enabled_by_cat.setdefault(setting.category_id, set()).add(setting.field_key)
+    for cat_id, enabled_fields in enabled_by_cat.items():
+        if "thickness_mm" in enabled_fields:
+            enabled_fields.add("length_mm")
     for cat in categories:
         if cat.id not in configured_cats:
             enabled_by_cat[cat.id] = default_fields_for_category(cat.name)
@@ -435,6 +437,15 @@ def build_field_definitions(custom_fields):
             "is_custom": True,
         })
     return defs
+
+def parse_length_thickness_value(raw_value, category_id):
+    if not raw_value:
+        return None, None
+    value = float(raw_value)
+    category = Category.query.get(category_id)
+    if category and category.name and category.name.strip().lower() == "rondelle":
+        return value, value
+    return value, None
 
 def save_custom_field_values(item: Item, form):
     active_fields = CustomField.query.filter_by(is_active=True).all()
@@ -787,16 +798,17 @@ def to_place():
 @login_required
 def add_item():
     f = request.form
+    length_mm, thickness_mm = parse_length_thickness_value(f.get("length_mm"), int(f.get("category_id")))
     item = Item(
         description=f.get("description") or None,
         category_id=int(f.get("category_id")),
         subtype_id=int(f.get("subtype_id")) if f.get("subtype_id") else None,
         thread_standard=f.get("thread_standard") or None,
         thread_size=f.get("thread_size") or None,
-        length_mm=float(f.get("length_mm")) if f.get("length_mm") else None,
+        length_mm=length_mm,
         outer_d_mm=float(f.get("outer_d_mm")) if f.get("outer_d_mm") else None,
         inner_d_mm=float(f.get("inner_d_mm")) if f.get("inner_d_mm") else None,
-        thickness_mm=float(f.get("thickness_mm")) if f.get("thickness_mm") else None,
+        thickness_mm=thickness_mm,
         drive=f.get("drive") or None,
         standoff_config=f.get("standoff_config") or None,
         material_id=int(f.get("material_id")) if f.get("material_id") else None,
@@ -825,15 +837,16 @@ def edit_item(item_id):
     item = Item.query.get_or_404(item_id)
     if request.method == "POST":
         f = request.form
+        length_mm, thickness_mm = parse_length_thickness_value(f.get("length_mm"), int(f.get("category_id")))
         item.description = f.get("description") or None
         item.category_id = int(f.get("category_id"))
         item.subtype_id = int(f.get("subtype_id")) if f.get("subtype_id") else None
         item.thread_standard = f.get("thread_standard") or None
         item.thread_size = f.get("thread_size") or None
-        item.length_mm = float(f.get("length_mm")) if f.get("length_mm") else None
+        item.length_mm = length_mm
         item.outer_d_mm = float(f.get("outer_d_mm")) if f.get("outer_d_mm") else None
         item.inner_d_mm = float(f.get("inner_d_mm")) if f.get("inner_d_mm") else None
-        item.thickness_mm = float(f.get("thickness_mm")) if f.get("thickness_mm") else None
+        item.thickness_mm = thickness_mm
         item.drive = f.get("drive") or None
         item.standoff_config = f.get("standoff_config") or None
         item.material_id = int(f.get("material_id")) if f.get("material_id") else None
@@ -1802,9 +1815,8 @@ def auto_assign():
     cabinets = Cabinet.query.order_by(Cabinet.name).all()
     categories = Category.query.order_by(Category.name).all()
     sort_options = [
-        ("length_mm", "Lunghezza (mm)"),
+        ("length_mm", "Lunghezza/Spessore (mm)"),
         ("outer_d_mm", "Ø esterno (mm)"),
-        ("thickness_mm",  "Spessore (mm)"),
         ("thread_size",  "Filettatura"),
         ("material",     "Materiale"),
         ("id",           "ID articolo"),
@@ -2410,6 +2422,13 @@ def lite_migrations():
                         WHERE lower(name) NOT IN ('viti', 'distanziali', 'torrette')
                       )
                 """)
+        if {"length_mm", "thickness_mm"}.issubset(cols):
+            cur.execute("""
+                UPDATE item
+                SET length_mm = thickness_mm
+                WHERE length_mm IS NULL
+                  AND thickness_mm IS NOT NULL
+            """)
     except sqlite3.OperationalError:
         pass
     con.commit(); con.close()
