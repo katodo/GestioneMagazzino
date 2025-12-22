@@ -2003,6 +2003,23 @@ def labels_pdf():
     if not items:
         flash("Nessun articolo valido per la stampa.", "warning"); return redirect(request.referrer or url_for("admin_items"))
 
+    assignments = (db.session.query(Assignment.item_id, Cabinet.name, Slot.col_code, Slot.row_num)
+                   .join(Slot, Assignment.slot_id == Slot.id)
+                   .join(Cabinet, Slot.cabinet_id == Cabinet.id)
+                   .filter(Assignment.item_id.in_(ids))
+                   .all())
+    pos_by_item = {a.item_id: (a.name, a.col_code, a.row_num) for a in assignments}
+    original_order = {item.id: idx for idx, item in enumerate(items)}
+
+    def _label_sort_key(item: Item):
+        pos = pos_by_item.get(item.id)
+        if pos:
+            cab_name, col_code, row_num = pos
+            return (0, cab_name or "", int(row_num), colcode_to_idx(col_code), original_order[item.id])
+        return (1, original_order[item.id])
+
+    items.sort(key=_label_sort_key)
+
     s = get_settings()
     include_qr = s.qr_default
 
@@ -2244,12 +2261,9 @@ def labels_pdf():
                 cy -= (title_size + 0.6)
 
         # posizione in basso a sinistra (Cassettiera-XY)
-        a = (db.session.query(Assignment, Slot, Cabinet)
-             .join(Slot, Assignment.slot_id == Slot.id)
-             .join(Cabinet, Slot.cabinet_id == Cabinet.id)
-             .filter(Assignment.item_id == item.id).first())
-        if a:
-            pos = make_full_position(a[2].name, a[1].col_code, a[1].row_num)
+        pos_data = pos_by_item.get(item.id)
+        if pos_data:
+            pos = make_full_position(pos_data[0], pos_data[1], pos_data[2])
             c.setFont("Helvetica", 6)
             c.drawString(x + mm_to_pt(1.5), y + 1.8, pos)
 
