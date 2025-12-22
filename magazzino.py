@@ -150,11 +150,11 @@ class Item(db.Model):
     thread_standard = db.Column(db.String(8), nullable=True)  # M, UNC, UNF
     thread_size     = db.Column(db.String(32), nullable=True) # "M3", "1/4-20", ...
     # dimensioni principali
-    main_size_mm    = db.Column(db.Float, nullable=True)      # viti/torrette=L; rondelle=Ø esterno
+    main_size_mm    = db.Column(db.Float, nullable=True)      # legacy (da migrare su Ø esterno o Lunghezza)
     inner_d_mm      = db.Column(db.Float, nullable=True)      # foro interno (rondelle)
     thickness_mm    = db.Column(db.Float, nullable=True)      # spessore (rondelle)
-    length_mm       = db.Column(db.Float, nullable=True)      # legacy
-    outer_d_mm      = db.Column(db.Float, nullable=True)      # legacy
+    length_mm       = db.Column(db.Float, nullable=True)      # lunghezza
+    outer_d_mm      = db.Column(db.Float, nullable=True)      # Ø esterno
     # nuovi campi specifici
     drive           = db.Column(db.String(32), nullable=True) # impronta (Viti)
     standoff_config = db.Column(db.String(16), nullable=True) # M/F, F/F, M/M, Passante (Torrette)
@@ -280,6 +280,9 @@ def is_screw(item:Item)->bool:
 def is_standoff(item:Item)->bool:
     return (item.category and item.category.name.lower()=="torrette")
 
+def is_spacer(item:Item)->bool:
+    return (item.category and item.category.name.lower()=="distanziali")
+
 def auto_name_for(item:Item)->str:
     parts=[]
     if item.category: parts.append(item.category.name)
@@ -290,9 +293,16 @@ def auto_name_for(item:Item)->str:
     if is_standoff(item) and item.standoff_config:
         parts.append(item.standoff_config)
     if item.thread_size: parts.append(item.thread_size)
-    if item.main_size_mm:
-        tag = "Øe" if is_washer(item) else "L="
-        val = int(item.main_size_mm) if item.main_size_mm and float(item.main_size_mm).is_integer() else item.main_size_mm
+    size_value = None
+    tag = None
+    if is_screw(item) or is_standoff(item) or is_spacer(item):
+        size_value = item.length_mm
+        tag = "L="
+    else:
+        size_value = item.outer_d_mm
+        tag = "Øe"
+    if size_value is not None:
+        val = int(size_value) if float(size_value).is_integer() else size_value
         parts.append(f"{tag}{val}mm")
     if item.material: parts.append(item.material.name)
     return " ".join(parts)[:118]
@@ -339,7 +349,8 @@ BUILTIN_FIELD_DEFS = [
     {"key": "thread_size", "label": "Misura"},
     {"key": "drive", "label": "Impronta"},
     {"key": "standoff_config", "label": "Configurazione torrette"},
-    {"key": "main_size_mm", "label": "Dimensione principale (mm)"},
+    {"key": "outer_d_mm", "label": "Ø esterno (mm)"},
+    {"key": "length_mm", "label": "Lunghezza (mm)"},
     {"key": "inner_d_mm", "label": "Ø interno (mm)"},
     {"key": "thickness_mm", "label": "Spessore (mm)"},
     {"key": "material_id", "label": "Materiale"},
@@ -362,15 +373,19 @@ def default_fields_for_category(cat_name: str) -> set:
         "subtype_id",
         "thread_standard",
         "thread_size",
-        "main_size_mm",
         "material_id",
         "finish_id",
         "description",
         "quantity",
     }
     if not cat_name:
+        base.update({"outer_d_mm", "length_mm"})
         return base
     lower = cat_name.strip().lower()
+    if lower in {"viti", "torrette", "distanziali"}:
+        base.add("length_mm")
+    else:
+        base.add("outer_d_mm")
     if lower == "rondelle":
         base.update({"inner_d_mm", "thickness_mm"})
     if lower == "viti":
@@ -624,8 +639,8 @@ def short_cell_text(item: Item) -> str:
             vv = int(v) if abs(v - int(v)) < 0.01 else v
             line1_parts.append(f"Øi{vv}")
 
-        if item.main_size_mm:
-            v = item.main_size_mm
+        if item.outer_d_mm:
+            v = item.outer_d_mm
             vv = int(v) if abs(v - int(v)) < 0.01 else v
             line2_parts.append(f"Øe{vv}")
 
@@ -650,13 +665,16 @@ def short_cell_text(item: Item) -> str:
     if item.thread_size:
         parts.append(item.thread_size)
 
-    if item.main_size_mm:
-        v = item.main_size_mm
+    main_value = item.length_mm if (is_screw(item) or is_standoff(item) or is_spacer(item)) else item.outer_d_mm
+    if main_value:
+        v = main_value
         vv = int(v) if abs(v - int(v)) < 0.01 else v
         if is_standoff(item):
             parts.append(f"L={vv}")
-        else:
+        elif is_screw(item) or is_spacer(item):
             parts.append(f"L={vv}")
+        else:
+            parts.append(f"Øe{vv}")
 
     if is_standoff(item) and item.standoff_config:
         parts.append(item.standoff_config)
@@ -686,7 +704,8 @@ def api_item(item_id):
         "category_color": item.category.color if item.category else None,
         "subtype": item.subtype.name if item.subtype else None,
         "thread_standard": item.thread_standard, "thread_size": item.thread_size,
-        "main_size_mm": item.main_size_mm,
+        "length_mm": item.length_mm,
+        "outer_d_mm": item.outer_d_mm,
         "inner_d_mm": item.inner_d_mm, "thickness_mm": item.thickness_mm,
         "material": item.material.name if item.material else None,
         "finish": item.finish.name if item.finish else None,
@@ -774,7 +793,8 @@ def add_item():
         subtype_id=int(f.get("subtype_id")) if f.get("subtype_id") else None,
         thread_standard=f.get("thread_standard") or None,
         thread_size=f.get("thread_size") or None,
-        main_size_mm=float(f.get("main_size_mm")) if f.get("main_size_mm") else None,
+        length_mm=float(f.get("length_mm")) if f.get("length_mm") else None,
+        outer_d_mm=float(f.get("outer_d_mm")) if f.get("outer_d_mm") else None,
         inner_d_mm=float(f.get("inner_d_mm")) if f.get("inner_d_mm") else None,
         thickness_mm=float(f.get("thickness_mm")) if f.get("thickness_mm") else None,
         drive=f.get("drive") or None,
@@ -810,7 +830,8 @@ def edit_item(item_id):
         item.subtype_id = int(f.get("subtype_id")) if f.get("subtype_id") else None
         item.thread_standard = f.get("thread_standard") or None
         item.thread_size = f.get("thread_size") or None
-        item.main_size_mm = float(f.get("main_size_mm")) if f.get("main_size_mm") else None
+        item.length_mm = float(f.get("length_mm")) if f.get("length_mm") else None
+        item.outer_d_mm = float(f.get("outer_d_mm")) if f.get("outer_d_mm") else None
         item.inner_d_mm = float(f.get("inner_d_mm")) if f.get("inner_d_mm") else None
         item.thickness_mm = float(f.get("thickness_mm")) if f.get("thickness_mm") else None
         item.drive = f.get("drive") or None
@@ -1701,7 +1722,8 @@ def _auto_assign_category(category_id: int,
         "id":           Item.id,
         "thread_size":  Item.thread_size,
         "thickness_mm": Item.thickness_mm,
-        "main_size_mm": Item.main_size_mm,
+        "length_mm":    Item.length_mm,
+        "outer_d_mm":   Item.outer_d_mm,
         "material":     Item.material_id,
     }
     order_cols = []
@@ -1780,7 +1802,8 @@ def auto_assign():
     cabinets = Cabinet.query.order_by(Cabinet.name).all()
     categories = Category.query.order_by(Category.name).all()
     sort_options = [
-        ("main_size_mm", "Misura principale (mm)"),
+        ("length_mm", "Lunghezza (mm)"),
+        ("outer_d_mm", "Ø esterno (mm)"),
         ("thickness_mm",  "Spessore (mm)"),
         ("thread_size",  "Filettatura"),
         ("material",     "Materiale"),
@@ -1790,7 +1813,7 @@ def auto_assign():
     # Valori di default letti dalla querystring
     form_cabinet_id  = request.args.get("cabinet_id", type=int)
     form_category_id = request.args.get("category_id", type=int)
-    primary_key      = request.args.get("primary_key") or "main_size_mm"
+    primary_key      = request.args.get("primary_key") or "length_mm"
     secondary_key    = request.args.get("secondary_key") or "material"
     direction        = (request.args.get("direction") or "H").upper()
     count_val        = request.args.get("count", type=int) or 10
@@ -1806,7 +1829,7 @@ def auto_assign():
         try:
             form_cabinet_id  = int(form.get("cabinet_id") or 0)
             form_category_id = int(form.get("category_id") or 0)
-            primary_key      = form.get("primary_key") or "main_size_mm"
+            primary_key      = form.get("primary_key") or "length_mm"
             secondary_key    = form.get("secondary_key") or ""
             direction        = (form.get("direction") or "H").upper()
             count_val        = max(1, int(form.get("count") or "1"))
@@ -2024,10 +2047,10 @@ def labels_pdf():
     def _line2(item):
         """
         Riga 2: dati tecnici in base al tipo.
-        - Viti:      Impronta, L<dim principale>, materiale
+        - Viti:      Impronta, L<lunghezza>, materiale
         - Rondelle:  Øi<interno>, Øe<esterno>, sp<spessore>
-        - Torrette:  config, L<dim principale>, materiale
-        - Altre:     Dim<dim principale>mm, sp<spessore>, materiale
+        - Torrette:  config, L<lunghezza>, materiale
+        - Altre:     Øe<esterno>, sp<spessore>, materiale
         """
         parts = []
 
@@ -2035,7 +2058,7 @@ def labels_pdf():
         if is_screw(item):
             if item.drive:
                 parts.append(item.drive)
-            v = _fmt_mm(item.main_size_mm)
+            v = _fmt_mm(item.length_mm)
             if v:
                 parts.append(f"L{v}")
             if item.material:
@@ -2046,7 +2069,7 @@ def labels_pdf():
             v_i = _fmt_mm(getattr(item, "inner_d_mm", None))
             if v_i:
                 parts.append(f"Øi{v_i}")
-            v_e = _fmt_mm(item.main_size_mm)
+            v_e = _fmt_mm(item.outer_d_mm)
             if v_e:
                 parts.append(f"Øe{v_e}")
             v_s = _fmt_mm(getattr(item, "thickness_mm", None))
@@ -2057,7 +2080,7 @@ def labels_pdf():
         elif is_standoff(item):
             if item.standoff_config:
                 parts.append(item.standoff_config)
-            v = _fmt_mm(item.main_size_mm)
+            v = _fmt_mm(item.length_mm)
             if v:
                 parts.append(f"L{v}")
             if item.material:
@@ -2065,9 +2088,9 @@ def labels_pdf():
 
         # Altre tipologie
         else:
-            v = _fmt_mm(item.main_size_mm)
+            v = _fmt_mm(item.outer_d_mm)
             if v:
-                parts.append(f"Dim{v}mm")
+                parts.append(f"Øe{v}")
             v_s = _fmt_mm(getattr(item, "thickness_mm", None))
             if v_s:
                 parts.append(f"sp{v_s}")
@@ -2119,8 +2142,8 @@ def labels_pdf():
                 if v is not None:
                     parts.append(f"Øi{v}")
 
-            if item.main_size_mm:
-                v = _fmt_mm(item.main_size_mm)
+            if item.outer_d_mm:
+                v = _fmt_mm(item.outer_d_mm)
                 if v is not None:
                     parts.append(f"Øe{v}")
 
@@ -2362,6 +2385,33 @@ def lite_migrations():
     # drop legacy columns if exist (short_code, pair_code) — only schema clean if empty db; otherwise ignore
     # (nessuna drop distruttiva automatica per evitare perdita dati involontaria)
     for sql in alters: cur.execute(sql)
+    cur.execute("PRAGMA table_info(item)"); cols = {row[1] for row in cur.fetchall()}
+    try:
+        if {"main_size_mm", "length_mm", "outer_d_mm"}.issubset(cols):
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='category'")
+            if cur.fetchone():
+                cur.execute("""
+                    UPDATE item
+                    SET length_mm = main_size_mm
+                    WHERE length_mm IS NULL
+                      AND main_size_mm IS NOT NULL
+                      AND category_id IN (
+                        SELECT id FROM category
+                        WHERE lower(name) IN ('viti', 'distanziali', 'torrette')
+                      )
+                """)
+                cur.execute("""
+                    UPDATE item
+                    SET outer_d_mm = main_size_mm
+                    WHERE outer_d_mm IS NULL
+                      AND main_size_mm IS NOT NULL
+                      AND category_id IN (
+                        SELECT id FROM category
+                        WHERE lower(name) NOT IN ('viti', 'distanziali', 'torrette')
+                      )
+                """)
+    except sqlite3.OperationalError:
+        pass
     con.commit(); con.close()
 
 def seed_if_empty_or_missing():
