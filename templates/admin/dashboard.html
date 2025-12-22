@@ -99,15 +99,19 @@
         </select>
       </div>
 
-      <div class="col-md-4 field-block" data-field-key="main_size_mm">
-        <label class="form-label">Dimensione principale (mm)</label>
-        <input type="number" step="0.01" class="form-control" name="main_size_mm" placeholder="L (viti/torrette) o Øe (rondelle)">
+      <div class="col-md-4 field-block" data-field-key="outer_d_mm">
+        <label class="form-label">Ø esterno (mm)</label>
+        <input type="number" step="0.01" class="form-control" name="outer_d_mm">
       </div>
-      <div class="col-md-3 field-block" data-field-key="inner_d_mm">
+      <div class="col-md-4 field-block" data-field-key="length_mm">
+        <label class="form-label">Lunghezza (mm)</label>
+        <input type="number" step="0.01" class="form-control" name="length_mm">
+      </div>
+      <div class="col-md-2 field-block" data-field-key="inner_d_mm">
         <label class="form-label">Ø interno (mm)</label>
         <input type="number" step="0.01" class="form-control" name="inner_d_mm">
       </div>
-      <div class="col-md-3 field-block" data-field-key="thickness_mm">
+      <div class="col-md-2 field-block" data-field-key="thickness_mm">
         <label class="form-label">Spessore (mm)</label>
         <input type="number" step="0.01" class="form-control" name="thickness_mm">
       </div>
@@ -176,7 +180,7 @@
         </div>
         <div class="form-check form-check-inline">
           <input class="form-check-input" type="checkbox" name="label_show_main" checked>
-          <label class="form-check-label">Dim. principale</label>
+          <label class="form-check-label">Ø esterno/Lunghezza</label>
         </div>
         <div class="form-check form-check-inline">
           <input class="form-check-input" type="checkbox" name="label_show_material" checked>
@@ -226,7 +230,8 @@
             <th>Categoria</th>
             <th>Nome</th>
             <th>Misura</th>
-            <th>Dim. princ. (mm)</th>
+            <th>Ø esterno (mm)</th>
+            <th>Lunghezza (mm)</th>
             <th>Spessore (mm)</th>
             <th>Materiale</th>
             <th>Q.ta</th>
@@ -242,7 +247,8 @@
             <td>{% if it.category %}<span class="badge-color" style="background:{{ it.category.color }}"></span>{{ it.category.name }}{% endif %}</td>
             <td>{{ compose_caption(it) }}</td>
             <td>{{ it.thread_size or "" }}</td>
-            <td>{{ '%.2f'|format(it.main_size_mm) if it.main_size_mm is not none else '' }}</td>
+            <td>{{ '%.2f'|format(it.outer_d_mm) if it.outer_d_mm is not none else '' }}</td>
+            <td>{{ '%.2f'|format(it.length_mm) if it.length_mm is not none else '' }}</td>
             <td>{{ '%.2f'|format(it.thickness_mm) if it.thickness_mm is not none else '' }}</td>
             <td>{{ it.material.name if it.material else '' }}</td>
             <td>
