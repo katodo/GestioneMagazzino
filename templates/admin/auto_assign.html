@@ -15,14 +15,12 @@
       </div>
       <div class="col-md-3">
         <label class="form-label">Categoria</label>
-        <select name="category_id" class="form-select" required>
+        <select name="category_id" class="form-select" id="categorySelect" required>
           {% for c in categories %}
-            <option value="{{ c.id }}" {{ 'selected' if c.id == form_category_id else '' }}>{{ c.name }}</option>
+            <option value="{{ c.id }}" data-unplaced="{{ unplaced_by_category.get(c.id, 0) }}" {{ 'selected' if c.id == form_category_id else '' }}>{{ c.name }}</option>
           {% endfor %}
         </select>
-        {% if unplaced_count is not none %}
-          <div class="form-text">Articoli non posizionati: {{ unplaced_count }}</div>
-        {% endif %}
+        <div class="form-text">Articoli non posizionati: <span id="unplacedCount">{{ unplaced_count if unplaced_count is not none else '' }}</span></div>
       </div>
       <div class="col-md-3">
         <label class="form-label">Chiave primaria</label>
@@ -43,7 +41,7 @@
       </div>
       <div class="col-md-3">
         <label class="form-label">Numero di articoli</label>
-        <input type="number" min="1" class="form-control" name="count" value="{{ count or 10 }}">
+        <input type="number" min="1" class="form-control" id="countInput" name="count" value="{{ count or 10 }}">
       </div>
       <div class="col-md-3">
         <label class="form-label">Direzione</label>
@@ -143,6 +141,21 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function(){
+  const categorySelect = document.getElementById('categorySelect');
+  const countInput = document.getElementById('countInput');
+  const unplacedCount = document.getElementById('unplacedCount');
+  if (categorySelect && countInput) {
+    categorySelect.addEventListener('change', function() {
+      const selected = categorySelect.options[categorySelect.selectedIndex];
+      const unplacedValue = selected ? selected.dataset.unplaced : '';
+      if (unplacedValue !== undefined && unplacedValue !== '') {
+        countInput.value = unplacedValue;
+      }
+      if (unplacedCount) {
+        unplacedCount.textContent = unplacedValue ?? '';
+      }
+    });
+  }
   const grid = document.getElementById('autoGrid');
   if (!grid) return;
   grid.addEventListener('click', function(e){

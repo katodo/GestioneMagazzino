@@ -1922,11 +1922,16 @@ def auto_assign():
     # GET o dopo redirect: preparo i dati per il template
     grid = build_full_grid(form_cabinet_id) if form_cabinet_id else {"rows": [], "cols": [], "cells": {}, "cab": None}
 
+    subq = select(Assignment.item_id)
+    unplaced_by_category = dict(
+        db.session.query(Item.category_id, func.count(Item.id))
+        .filter(Item.id.not_in(subq))
+        .group_by(Item.category_id)
+        .all()
+    )
     unplaced_count = None
     if form_category_id:
-        subq = select(Assignment.item_id)
-        q = Item.query.filter(Item.id.not_in(subq), Item.category_id == form_category_id)
-        unplaced_count = q.count()
+        unplaced_count = unplaced_by_category.get(form_category_id, 0)
 
     return render_template(
         "admin/auto_assign.html",
@@ -1944,6 +1949,7 @@ def auto_assign():
         start_row=start_row,
         clear_occupied=clear_occupied,
         unplaced_count=unplaced_count,
+        unplaced_by_category=unplaced_by_category,
     )
 
 
