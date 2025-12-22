@@ -55,7 +55,7 @@
     </div>
     <div class="col-md-4 field-block" data-field-key="length_mm">
       <label class="form-label">Lunghezza/Spessore (mm)</label>
-      <input type="number" step="0.01" class="form-control" name="length_mm" value="{{ item.length_mm if item.length_mm is not none else (item.thickness_mm if item.thickness_mm is not none else '') }}">
+      <input type="number" step="0.01" class="form-control" name="length_mm" value="{{ item.length_mm if item.length_mm is not none else '' }}">
     </div>
     <div class="col-md-2 field-block" data-field-key="inner_d_mm">
       <label class="form-label">Ø interno (mm)</label>

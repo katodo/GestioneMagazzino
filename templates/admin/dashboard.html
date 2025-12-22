@@ -243,15 +243,7 @@
             <td>{{ compose_caption(it) }}</td>
             <td>{{ it.thread_size or "" }}</td>
             <td>{{ '%.2f'|format(it.outer_d_mm) if it.outer_d_mm is not none else '' }}</td>
-            <td>
-              {% if it.length_mm is not none and it.thickness_mm is not none %}
-                {{ '%.2f'|format(it.length_mm) }} / {{ '%.2f'|format(it.thickness_mm) }}
-              {% elif it.length_mm is not none %}
-                {{ '%.2f'|format(it.length_mm) }}
-              {% elif it.thickness_mm is not none %}
-                {{ '%.2f'|format(it.thickness_mm) }}
-              {% endif %}
-            </td>
+            <td>{{ '%.2f'|format(it.length_mm) if it.length_mm is not none else '' }}</td>
             <td>{{ it.material.name if it.material else '' }}</td>
             <td>
               {% if it.quantity <= 0 %}

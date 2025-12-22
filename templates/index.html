@@ -105,13 +105,7 @@
         <td>{{ item.thread_size }}</td>
         <td>{{ '%.2f'|format(item.outer_d_mm) if item.outer_d_mm is not none else '' }}</td>
         <td>
-          {% if item.length_mm is not none and item.thickness_mm is not none %}
-            {{ '%.2f'|format(item.length_mm) }} / {{ '%.2f'|format(item.thickness_mm) }}
-          {% elif item.length_mm is not none %}
-            {{ '%.2f'|format(item.length_mm) }}
-          {% elif item.thickness_mm is not none %}
-            {{ '%.2f'|format(item.thickness_mm) }}
-          {% endif %}
+          {{ '%.2f'|format(item.length_mm) if item.length_mm is not none else '' }}
         </td>
         <td>{{ item.material.name if item.material else '' }}</td>
         <td>
