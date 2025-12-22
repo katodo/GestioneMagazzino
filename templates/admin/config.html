@@ -1,9 +1,20 @@
 {% extends "base.html" %}
 {% block content %}
 <h3>Configurazione</h3>
+<nav class="mb-3">
+  <ul class="nav nav-pills flex-wrap gap-2">
+    <li class="nav-item"><a class="nav-link" href="#campi-categoria">Campi per categoria</a></li>
+    <li class="nav-item"><a class="nav-link" href="#stampa-etichette">Stampa etichette & QR</a></li>
+    <li class="nav-item"><a class="nav-link" href="#campi-personalizzati">Campi personalizzati</a></li>
+    <li class="nav-item"><a class="nav-link" href="#ubicazioni">Ubicazioni</a></li>
+    <li class="nav-item"><a class="nav-link" href="#cassettiere">Cassettiere</a></li>
+    <li class="nav-item"><a class="nav-link" href="#fusione-cassetti">Fusione cassetti</a></li>
+    <li class="nav-item"><a class="nav-link" href="#sposta-cassetti">Sposta / Scambia cassetti</a></li>
+  </ul>
+</nav>
 <div class="row g-3">
-  <div class="col-xl-8">
-    <div class="form-section">
+  <div class="col-12">
+    <div class="form-section" id="campi-categoria">
       <h5>Campi per categoria</h5>
       <p class="text-muted mb-2">Categorie in riga, attributi in colonna: spunta i checkbox per attivare il campo e salva la riga.</p>
       <div class="table-responsive">
@@ -41,8 +52,8 @@
     </div>
   </div>
 
-  <div class="col-xl-4">
-    <div class="form-section h-100">
+  <div class="col-12">
+    <div class="form-section" id="stampa-etichette">
       <h5>Stampa etichette & QR</h5>
       <form method="post" action="{{ url_for('update_settings') }}" class="row g-2">
         <div class="col-6"><label class="form-label">Larghezza (mm)</label><input type="number" step="0.1" class="form-control" name="label_w_mm" value="{{ settings.label_w_mm }}"></div>
@@ -74,8 +85,8 @@
     </div>
   </div>
 
-  <div class="col-xl-4">
-    <div class="form-section">
+  <div class="col-12">
+    <div class="form-section" id="campi-personalizzati">
       <h5>Campi personalizzati</h5>
       <form method="post" action="{{ url_for('add_custom_field') }}" class="row g-2 mb-3">
         <div class="col-md-6">
@@ -171,8 +182,8 @@
     </div>
   </div>
 
-  <div class="col-xl-8">
-    <div class="form-section">
+  <div class="col-12">
+    <div class="form-section" id="ubicazioni">
       <h5>Ubicazioni</h5>
       <form method="post" action="{{ url_for('add_location') }}" class="row g-2 mb-2">
         <div class="col-md-9"><input class="form-control" name="name" placeholder="Nome ubicazione"></div>
@@ -202,7 +213,7 @@
   </div>
 
   <div class="col-12">
-    <div class="form-section">
+    <div class="form-section" id="cassettiere">
       <h5>Cassettiere</h5>
       <form method="post" action="{{ url_for('add_cabinet') }}" class="row g-2 mb-2">
         <div class="col-md-4">
@@ -266,7 +277,7 @@
   </div>
 
   <div class="col-12">
-    <div class="form-section">
+    <div class="form-section" id="fusione-cassetti">
       <h5>Fusione cassetti</h5>
       <form method="post" action="{{ url_for('add_drawer_merge') }}" class="row g-2 mb-2">
         <div class="col-md-4">
@@ -306,7 +317,7 @@
   </div>
 
   <div class="col-12">
-    <div class="form-section">
+    <div class="form-section" id="sposta-cassetti">
       <h5>Sposta / Scambia cassetti</h5>
       <form method="post" action="{{ url_for('move_slot') }}" class="row g-2">
         <div class="col-md-3">
