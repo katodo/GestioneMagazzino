@@ -84,13 +84,6 @@
         {% endfor %}
       </div>
 
-      <div class="col-md-4 field-block" data-field-key="drive">
-        <label class="form-label">Impronta (Viti)</label>
-        <select class="form-select" name="drive" id="driveSel">
-          <option value="">—</option>
-          {% for d in drive_options %}<option value="{{ d.name }}">{{ d.name }}</option>{% endfor %}
-        </select>
-      </div>
       <div class="col-md-4 field-block" data-field-key="standoff_config">
         <label class="form-label">Configurazione (Torrette)</label>
         <select class="form-select" name="standoff_config" id="standoffSel">

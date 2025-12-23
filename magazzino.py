@@ -2,7 +2,7 @@
 from flask import Flask, render_template, redirect, url_for, request, jsonify, flash, send_file
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-from sqlalchemy import func, select, or_
+from sqlalchemy import func, select, or_, text
 import os, io, sqlite3
 
 # ===================== DEFAULT ETICHETTE =====================
@@ -72,11 +72,6 @@ class ThreadSize(db.Model):
     sort_order = db.Column(db.Integer, nullable=False, default=0)
     __table_args__ = (db.UniqueConstraint('standard_id', 'value', name='uq_size_per_standard'),)
     standard = db.relationship("ThreadStandard")
-
-class DriveOption(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(64), unique=True, nullable=False)
-    sort_order = db.Column(db.Integer, nullable=False, default=0)
 
 class StandoffConfigOption(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -156,7 +151,6 @@ class Item(db.Model):
     length_mm       = db.Column(db.Float, nullable=True)      # lunghezza
     outer_d_mm      = db.Column(db.Float, nullable=True)      # Ø esterno
     # nuovi campi specifici
-    drive           = db.Column(db.String(32), nullable=True) # impronta (Viti)
     standoff_config = db.Column(db.String(16), nullable=True) # M/F, F/F, M/M, Passante (Torrette)
     # materiali/quantità
     material_id     = db.Column(db.Integer, db.ForeignKey("material.id"), nullable=True)
@@ -288,8 +282,6 @@ def auto_name_for(item:Item)->str:
     if item.category: parts.append(item.category.name)
     if item.subtype: parts.append(item.subtype.name)  # forma testa / forma torrette
     # attributi specifici
-    if is_screw(item) and item.drive:
-        parts.append(item.drive)
     if is_standoff(item) and item.standoff_config:
         parts.append(item.standoff_config)
     if item.thread_size: parts.append(item.thread_size)
@@ -336,18 +328,16 @@ def load_form_options():
     sizes_by_standard = {}
     for size in thread_sizes:
         sizes_by_standard.setdefault(size.standard.code, []).append(size.value)
-    drive_options = DriveOption.query.order_by(DriveOption.sort_order, DriveOption.name).all()
     standoff_cfgs = StandoffConfigOption.query.order_by(
         StandoffConfigOption.sort_order,
         StandoffConfigOption.name,
     ).all()
-    return thread_standards, sizes_by_standard, drive_options, standoff_cfgs
+    return thread_standards, sizes_by_standard, standoff_cfgs
 
 BUILTIN_FIELD_DEFS = [
     {"key": "subtype_id", "label": "Sottotipo (forma)"},
     {"key": "thread_standard", "label": "Standard"},
     {"key": "thread_size", "label": "Misura"},
-    {"key": "drive", "label": "Impronta"},
     {"key": "standoff_config", "label": "Configurazione torrette"},
     {"key": "outer_d_mm", "label": "Ø esterno (mm)"},
     {"key": "length_mm", "label": "Lunghezza/Spessore (mm)"},
@@ -387,8 +377,6 @@ def default_fields_for_category(cat_name: str) -> set:
         base.add("outer_d_mm")
     if lower == "rondelle":
         base.update({"inner_d_mm", "length_mm"})
-    if lower == "viti":
-        base.add("drive")
     if lower == "torrette":
         base.add("standoff_config")
     return base
@@ -416,6 +404,7 @@ def build_category_field_map(categories):
         if setting.is_enabled and setting.field_key != "__none__":
             enabled_by_cat.setdefault(setting.category_id, set()).add(setting.field_key)
     for cat_id, enabled_fields in enabled_by_cat.items():
+        enabled_fields.discard("drive")
         if "thickness_mm" in enabled_fields:
             enabled_fields.add("length_mm")
     for cat in categories:
@@ -687,9 +676,6 @@ def short_cell_text(item: Item) -> str:
     if is_standoff(item) and item.standoff_config:
         parts.append(item.standoff_config)
 
-    if is_screw(item) and item.drive:
-        parts.append(item.drive)
-
     if not parts:
         parts.append(auto_name_for(item))
 
@@ -725,7 +711,6 @@ def api_item(item_id):
         "material": item.material.name if item.material else None,
         "finish": item.finish.name if item.finish else None,
         "quantity": item.quantity,
-        "drive": item.drive,
         "standoff_config": item.standoff_config,
         "position": full_pos
     })
@@ -750,7 +735,7 @@ def admin_items():
     )
     pos_by_item = {a.item_id: make_full_position(a.name, a.col_code, a.row_num) for a in assignments}
 
-    thread_standards, sizes_by_standard, drive_options, standoff_cfgs = load_form_options()
+    thread_standards, sizes_by_standard, standoff_cfgs = load_form_options()
     default_standard_code = next(
         (s.code for s in thread_standards if s.code == "M"),
         thread_standards[0].code if thread_standards else "",
@@ -778,7 +763,7 @@ def admin_items():
         thread_standards=thread_standards,
         sizes_by_standard=sizes_by_standard,
         default_standard_code=default_standard_code,
-        drive_options=drive_options, standoff_cfgs=standoff_cfgs,
+        standoff_cfgs=standoff_cfgs,
         pos_by_item=pos_by_item,
         custom_fields=serialized_custom_fields,
         category_fields=category_fields,
@@ -813,7 +798,6 @@ def add_item():
         outer_d_mm=float(f.get("outer_d_mm")) if f.get("outer_d_mm") else None,
         inner_d_mm=float(f.get("inner_d_mm")) if f.get("inner_d_mm") else None,
         thickness_mm=thickness_mm,
-        drive=f.get("drive") or None,
         standoff_config=f.get("standoff_config") or None,
         material_id=int(f.get("material_id")) if f.get("material_id") else None,
         finish_id=int(f.get("finish_id")) if f.get("finish_id") else None,
@@ -851,7 +835,6 @@ def edit_item(item_id):
         item.outer_d_mm = float(f.get("outer_d_mm")) if f.get("outer_d_mm") else None
         item.inner_d_mm = float(f.get("inner_d_mm")) if f.get("inner_d_mm") else None
         item.thickness_mm = thickness_mm
-        item.drive = f.get("drive") or None
         item.standoff_config = f.get("standoff_config") or None
         item.material_id = int(f.get("material_id")) if f.get("material_id") else None
         item.finish_id = int(f.get("finish_id")) if f.get("finish_id") else None
@@ -878,7 +861,7 @@ def edit_item(item_id):
     for s in subtypes:
         subtypes_by_cat.setdefault(s.category_id, []).append({"id": s.id, "name": s.name})
 
-    thread_standards, sizes_by_standard, drive_options, standoff_cfgs = load_form_options()
+    thread_standards, sizes_by_standard, standoff_cfgs = load_form_options()
 
     pos = (db.session.query(Assignment, Slot, Cabinet)
            .join(Slot, Assignment.slot_id == Slot.id)
@@ -898,7 +881,7 @@ def edit_item(item_id):
         item=item, categories=categories, materials=materials, finishes=finishes,
         cabinets=cabinets, subtypes_by_cat=subtypes_by_cat,
         thread_standards=thread_standards, sizes_by_standard=sizes_by_standard,
-        drive_options=drive_options, standoff_cfgs=standoff_cfgs,
+        standoff_cfgs=standoff_cfgs,
         custom_fields=serialized_custom_fields,
         custom_field_values=custom_field_values,
         category_fields=category_fields
@@ -1000,7 +983,6 @@ def admin_categories():
     categories = Category.query.order_by(Category.name).all()
     materials  = Material.query.order_by(Material.name).all()
     finishes   = Finish.query.order_by(Finish.name).all()
-    drive_options = DriveOption.query.order_by(DriveOption.sort_order, DriveOption.name).all()
     standoff_cfgs = StandoffConfigOption.query.order_by(
         StandoffConfigOption.sort_order,
         StandoffConfigOption.name,
@@ -1012,14 +994,21 @@ def admin_categories():
         .order_by(Category.name, Subtype.name)
         .all()
     )
+    used_subtypes = {
+        subtype_id
+        for (subtype_id,) in db.session.query(Item.subtype_id)
+        .filter(Item.subtype_id.isnot(None))
+        .distinct()
+        .all()
+    }
     return render_template(
         "admin/categories.html",
         categories=categories,
         materials=materials,
         finishes=finishes,
-        drive_options=drive_options,
         standoff_cfgs=standoff_cfgs,
         subtypes=subtypes,
+        used_subtypes=used_subtypes,
     )
 
 @app.route("/admin/categories/add", methods=["POST"])
@@ -1217,53 +1206,6 @@ def delete_finish(fin_id):
         flash("Finitura eliminata.", "success")
     return redirect(url_for("admin_categories"))
 
-@app.route("/admin/drive_options/add", methods=["POST"])
-@login_required
-def add_drive_option():
-    name = (request.form.get("name") or "").strip()
-    sort_order = int(request.form.get("sort_order") or 0)
-    if len(name) < 2:
-        return _flash_back("Nome impronta troppo corto.", "danger", "admin_categories")
-    if DriveOption.query.filter_by(name=name).first():
-        return _flash_back("Impronta già esistente.", "danger", "admin_categories")
-
-    db.session.add(DriveOption(name=name, sort_order=sort_order))
-    db.session.commit()
-    flash("Impronta aggiunta.", "success")
-    return redirect(url_for("admin_categories"))
-
-
-@app.route("/admin/drive_options/<int:opt_id>/update", methods=["POST"])
-@login_required
-def update_drive_option(opt_id):
-    opt = DriveOption.query.get_or_404(opt_id)
-    name = (request.form.get("name") or "").strip()
-    sort_order = int(request.form.get("sort_order") or opt.sort_order)
-    if len(name) < 2:
-        return _flash_back("Nome impronta troppo corto.", "danger", "admin_categories")
-    if DriveOption.query.filter(DriveOption.id != opt.id, DriveOption.name == name).first():
-        return _flash_back("Esiste già un'impronta con questo nome.", "danger", "admin_categories")
-
-    opt.name = name
-    opt.sort_order = sort_order
-    db.session.commit()
-    flash("Impronta aggiornata.", "success")
-    return redirect(url_for("admin_categories"))
-
-
-@app.route("/admin/drive_options/<int:opt_id>/delete", methods=["POST"])
-@login_required
-def delete_drive_option(opt_id):
-    opt = DriveOption.query.get_or_404(opt_id)
-    used = Item.query.filter_by(drive=opt.name).first()
-    if used:
-        flash("Impossibile eliminare: ci sono articoli che usano questa impronta.", "danger")
-    else:
-        db.session.delete(opt)
-        db.session.commit()
-        flash("Impronta eliminata.", "success")
-    return redirect(url_for("admin_categories"))
-
 @app.route("/admin/standoff_configs/add", methods=["POST"])
 @login_required
 def add_standoff_config():
@@ -1291,8 +1233,11 @@ def update_standoff_config(opt_id):
     if StandoffConfigOption.query.filter(StandoffConfigOption.id != opt.id, StandoffConfigOption.name == name).first():
         return _flash_back("Esiste già una configurazione con questo nome.", "danger", "admin_categories")
 
+    previous_name = opt.name
     opt.name = name
     opt.sort_order = sort_order
+    if name != previous_name:
+        Item.query.filter_by(standoff_config=previous_name).update({"standoff_config": name})
     db.session.commit()
     flash("Configurazione aggiornata.", "success")
     return redirect(url_for("admin_categories"))
@@ -2187,7 +2132,7 @@ def labels_pdf():
     def _line2(item):
         """
         Riga 2: dati tecnici in base al tipo.
-        - Viti:      Impronta, L<lunghezza>, materiale
+        - Viti:      L<lunghezza>, materiale
         - Rondelle:  Øi<interno>, Øe<esterno>, sp<spessore>
         - Torrette:  config, L<lunghezza>, materiale
         - Altre:     Øe<esterno>, sp<spessore>, materiale
@@ -2196,8 +2141,6 @@ def labels_pdf():
 
         # Viti
         if is_screw(item):
-            if item.drive:
-                parts.append(item.drive)
             v = _fmt_mm(item.length_mm)
             if v:
                 parts.append(f"L{v}")
@@ -2407,7 +2350,6 @@ def lite_migrations():
     if "length_mm" not in cols:           alters.append("ALTER TABLE item ADD COLUMN length_mm FLOAT")
     if "outer_d_mm" not in cols:          alters.append("ALTER TABLE item ADD COLUMN outer_d_mm FLOAT")
     if "label_show_thread" not in cols:   alters.append("ALTER TABLE item ADD COLUMN label_show_thread BOOLEAN NOT NULL DEFAULT 1")
-    if "drive" not in cols:               alters.append("ALTER TABLE item ADD COLUMN drive TEXT")
     if "standoff_config" not in cols:     alters.append("ALTER TABLE item ADD COLUMN standoff_config TEXT")
     # settings table
     cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='settings'")
@@ -2445,15 +2387,6 @@ def lite_migrations():
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(standard_id, value),
                 FOREIGN KEY(standard_id) REFERENCES thread_standard(id)
-            )
-        """)
-    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='drive_option'")
-    if not cur.fetchone():
-        cur.execute("""
-            CREATE TABLE drive_option (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE,
-                sort_order INTEGER NOT NULL DEFAULT 0
             )
         """)
     cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='standoff_config_option'")
@@ -2582,6 +2515,58 @@ def lite_migrations():
         pass
     con.commit(); con.close()
 
+def migrate_drive_to_subtype():
+    try:
+        cols = {
+            row[1]
+            for row in db.session.execute(text("PRAGMA table_info(item)")).fetchall()
+        }
+    except Exception:
+        return
+    if "drive" not in cols:
+        return
+    rows = db.session.execute(
+        text("""
+            SELECT id, category_id, subtype_id, drive
+            FROM item
+            WHERE drive IS NOT NULL
+              AND trim(drive) != ''
+        """)
+    ).fetchall()
+    if not rows:
+        return
+    for row in rows:
+        data = row._mapping
+        drive_value = (data["drive"] or "").strip()
+        if not drive_value:
+            continue
+        subtype_name = None
+        if data["subtype_id"]:
+            subtype = Subtype.query.get(data["subtype_id"])
+            base_name = subtype.name if subtype else ""
+            subtype_name = f"{base_name} {drive_value}".strip()
+        else:
+            subtype_name = drive_value
+        if not subtype_name:
+            continue
+        subtype = Subtype.query.filter_by(
+            category_id=data["category_id"],
+            name=subtype_name,
+        ).first()
+        if not subtype:
+            subtype = Subtype(category_id=data["category_id"], name=subtype_name)
+            db.session.add(subtype)
+            db.session.flush()
+        item = Item.query.get(data["id"])
+        if item:
+            item.subtype_id = subtype.id
+            item.name = auto_name_for(item)
+        db.session.execute(
+            text("UPDATE item SET drive = NULL WHERE id = :item_id"),
+            {"item_id": data["id"]},
+        )
+    db.session.commit()
+
 def seed_if_empty_or_missing():
     if not User.query.filter_by(username="admin").first():
         db.session.add(User(username="admin", password="admin"))
@@ -2632,19 +2617,6 @@ def seed_if_empty_or_missing():
             exists = ThreadSize.query.filter_by(standard_id=standard.id, value=value).first()
             if not exists:
                 db.session.add(ThreadSize(standard_id=standard.id, value=value, sort_order=idx * 10))
-
-    drive_defaults = [
-        "Taglio",
-        "Phillips (PH)",
-        "Pozidriv (PZ)",
-        "Torx (TX)",
-        "Esagonale incassato (brugola)",
-        "Robertson (quadra)",
-        "Spanner",
-    ]
-    for idx, name in enumerate(drive_defaults, start=1):
-        if not DriveOption.query.filter_by(name=name).first():
-            db.session.add(DriveOption(name=name, sort_order=idx * 10))
 
     standoff_defaults = ["M/F", "F/F", "M/M", "Passante"]
     for idx, name in enumerate(standoff_defaults, start=1):
@@ -2723,6 +2695,7 @@ def init_db():
         db.create_all()
         lite_migrations()
         seed_if_empty_or_missing()
+        migrate_drive_to_subtype()
 
 # ===================== MAIN =====================
 if __name__ == "__main__":
