@@ -3,7 +3,7 @@ from flask import Flask, render_template, redirect, url_for, request, jsonify, f
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from sqlalchemy import func, select, or_, text
-import os, io, sqlite3
+import os, io
 
 # ===================== DEFAULT ETICHETTE =====================
 DEFAULT_LABEL_W_MM = 50
@@ -140,7 +140,6 @@ class Item(db.Model):
     thread_standard = db.Column(db.String(8), nullable=True)  # M, UNC, UNF
     thread_size     = db.Column(db.String(32), nullable=True) # "M3", "1/4-20", ...
     # dimensioni principali
-    main_size_mm    = db.Column(db.Float, nullable=True)      # legacy (da migrare su Ø esterno o Lunghezza)
     inner_d_mm      = db.Column(db.Float, nullable=True)      # foro interno (rondelle)
     thickness_mm    = db.Column(db.Float, nullable=True)      # spessore (rondelle)
     length_mm       = db.Column(db.Float, nullable=True)      # lunghezza
@@ -155,7 +154,6 @@ class Item(db.Model):
     label_show_measure  = db.Column(db.Boolean, nullable=False, default=True)
     label_show_main     = db.Column(db.Boolean, nullable=False, default=True)
     label_show_material = db.Column(db.Boolean, nullable=False, default=True)
-    label_show_thread   = db.Column(db.Boolean, nullable=False, default=True)
 
     category = db.relationship("Category")
     subtype  = db.relationship("Subtype")
@@ -387,8 +385,6 @@ def build_category_field_map(categories):
         if setting.is_enabled and setting.field_key != "__none__":
             enabled_by_cat.setdefault(setting.category_id, set()).add(setting.field_key)
     for cat_id, enabled_fields in enabled_by_cat.items():
-        enabled_fields.discard("drive")
-        enabled_fields.discard("standoff_config")
         if "thickness_mm" in enabled_fields:
             enabled_fields.add("length_mm")
     for cat in categories:
@@ -785,7 +781,6 @@ def add_item():
         label_show_measure =bool(f.get("label_show_measure")),
         label_show_main    =bool(f.get("label_show_main")),
         label_show_material=bool(f.get("label_show_material")),
-        label_show_thread  =bool(f.get("label_show_measure")),  # compat
     )
     item.name = auto_name_for(item)
     db.session.add(item); db.session.flush()
@@ -821,7 +816,6 @@ def edit_item(item_id):
         item.label_show_measure  = bool(f.get("label_show_measure"))
         item.label_show_main     = bool(f.get("label_show_main"))
         item.label_show_material = bool(f.get("label_show_material"))
-        item.label_show_thread   = bool(f.get("label_show_measure"))
         item.name = auto_name_for(item)
         save_custom_field_values(item, f)
         db.session.commit()
@@ -2271,279 +2265,7 @@ def labels_pdf():
     c.save(); buf.seek(0)
     return send_file(buf, as_attachment=True, download_name="etichette.pdf", mimetype="application/pdf")
 
-# ===================== INIT / MIGRAZIONI / SEED =====================
-def lite_migrations():
-    con = sqlite3.connect(db_path); cur = con.cursor()
-    # add columns if existing DB
-    cur.execute("PRAGMA table_info(item)"); cols = {row[1] for row in cur.fetchall()}
-    alters = []
-    if "main_size_mm" not in cols:        alters.append("ALTER TABLE item ADD COLUMN main_size_mm FLOAT")
-    if "label_show_measure" not in cols:  alters.append("ALTER TABLE item ADD COLUMN label_show_measure BOOLEAN NOT NULL DEFAULT 1")
-    if "label_show_main" not in cols:     alters.append("ALTER TABLE item ADD COLUMN label_show_main BOOLEAN NOT NULL DEFAULT 1")
-    if "inner_d_mm" not in cols:          alters.append("ALTER TABLE item ADD COLUMN inner_d_mm FLOAT")
-    if "thickness_mm" not in cols:        alters.append("ALTER TABLE item ADD COLUMN thickness_mm FLOAT")
-    if "length_mm" not in cols:           alters.append("ALTER TABLE item ADD COLUMN length_mm FLOAT")
-    if "outer_d_mm" not in cols:          alters.append("ALTER TABLE item ADD COLUMN outer_d_mm FLOAT")
-    if "label_show_thread" not in cols:   alters.append("ALTER TABLE item ADD COLUMN label_show_thread BOOLEAN NOT NULL DEFAULT 1")
-    # settings table
-    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='settings'")
-    if not cur.fetchone():
-        cur.execute("""
-            CREATE TABLE settings (
-                id INTEGER PRIMARY KEY,
-                label_w_mm FLOAT NOT NULL,
-                label_h_mm FLOAT NOT NULL,
-                margin_tb_mm FLOAT NOT NULL,
-                margin_lr_mm FLOAT NOT NULL,
-                gap_mm FLOAT NOT NULL,
-                orientation_landscape BOOLEAN NOT NULL,
-                qr_default BOOLEAN NOT NULL,
-                qr_base_url TEXT
-            )
-        """)
-    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='thread_standard'")
-    if not cur.fetchone():
-        cur.execute("""
-            CREATE TABLE thread_standard (
-                id INTEGER PRIMARY KEY,
-                code TEXT NOT NULL UNIQUE,
-                label TEXT NOT NULL,
-                sort_order INTEGER NOT NULL DEFAULT 0
-            )
-        """)
-    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='thread_size'")
-    if not cur.fetchone():
-        cur.execute("""
-            CREATE TABLE thread_size (
-                id INTEGER PRIMARY KEY,
-                standard_id INTEGER NOT NULL,
-                value TEXT NOT NULL,
-                sort_order INTEGER NOT NULL DEFAULT 0,
-                UNIQUE(standard_id, value),
-                FOREIGN KEY(standard_id) REFERENCES thread_standard(id)
-            )
-        """)
-    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='custom_field'")
-    if not cur.fetchone():
-        cur.execute("""
-            CREATE TABLE custom_field (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE,
-                field_type TEXT NOT NULL,
-                options TEXT,
-                unit TEXT,
-                sort_order INTEGER NOT NULL DEFAULT 0,
-                is_active BOOLEAN NOT NULL DEFAULT 1
-            )
-        """)
-    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='category_field_setting'")
-    if not cur.fetchone():
-        cur.execute("""
-            CREATE TABLE category_field_setting (
-                id INTEGER PRIMARY KEY,
-                category_id INTEGER NOT NULL,
-                field_key TEXT NOT NULL,
-                is_enabled BOOLEAN NOT NULL DEFAULT 1,
-                UNIQUE(category_id, field_key),
-                FOREIGN KEY(category_id) REFERENCES category(id)
-            )
-        """)
-    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='item_custom_field_value'")
-    if not cur.fetchone():
-        cur.execute("""
-            CREATE TABLE item_custom_field_value (
-                id INTEGER PRIMARY KEY,
-                item_id INTEGER NOT NULL,
-                field_id INTEGER NOT NULL,
-                value_text TEXT,
-                UNIQUE(item_id, field_id),
-                FOREIGN KEY(item_id) REFERENCES item(id),
-                FOREIGN KEY(field_id) REFERENCES custom_field(id)
-            )
-        """)
-    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='drawer_merge'")
-    if not cur.fetchone():
-        cur.execute("""
-            CREATE TABLE drawer_merge (
-                id INTEGER PRIMARY KEY,
-                cabinet_id INTEGER NOT NULL,
-                row_start INTEGER NOT NULL,
-                row_end INTEGER NOT NULL,
-                col_start TEXT NOT NULL,
-                col_end TEXT NOT NULL,
-                FOREIGN KEY(cabinet_id) REFERENCES cabinet(id)
-            )
-        """)
-    con.commit()
-    # drop legacy columns if exist (short_code, pair_code) — only schema clean if empty db; otherwise ignore
-    # (nessuna drop distruttiva automatica per evitare perdita dati involontaria)
-    for sql in alters: cur.execute(sql)
-    cur.execute("PRAGMA table_info(item)"); cols = {row[1] for row in cur.fetchall()}
-    try:
-        if {"length_mm", "thickness_mm"}.issubset(cols):
-            cur.execute("""
-                SELECT id, length_mm, thickness_mm
-                FROM item
-                WHERE length_mm IS NOT NULL
-                  AND thickness_mm IS NOT NULL
-                  AND length_mm != thickness_mm
-            """)
-            for item_id, length_mm, thickness_mm in cur.fetchall():
-                while True:
-                    try:
-                        choice = input(
-                            f"[migrazione] Articolo #{item_id} ha lunghezza {length_mm} e spessore {thickness_mm}. "
-                            "Quale valore usare per Lunghezza/Spessore? (L/S): "
-                        ).strip().lower()
-                    except EOFError:
-                        choice = "l"
-                    if choice in {"l", "s"}:
-                        break
-                    print("Scelta non valida. Inserisci 'L' o 'S'.")
-                chosen_value = length_mm if choice == "l" else thickness_mm
-                cur.execute(
-                    "UPDATE item SET length_mm = ?, thickness_mm = NULL WHERE id = ?",
-                    (chosen_value, item_id),
-                )
-        if {"main_size_mm", "length_mm", "outer_d_mm"}.issubset(cols):
-            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='category'")
-            if cur.fetchone():
-                cur.execute("""
-                    UPDATE item
-                    SET length_mm = main_size_mm
-                    WHERE length_mm IS NULL
-                      AND main_size_mm IS NOT NULL
-                      AND category_id IN (
-                        SELECT id FROM category
-                        WHERE lower(name) IN ('viti', 'distanziali', 'torrette')
-                      )
-                """)
-                cur.execute("""
-                    UPDATE item
-                    SET outer_d_mm = main_size_mm
-                    WHERE outer_d_mm IS NULL
-                      AND main_size_mm IS NOT NULL
-                      AND category_id IN (
-                        SELECT id FROM category
-                        WHERE lower(name) NOT IN ('viti', 'distanziali', 'torrette')
-                      )
-                """)
-        if {"length_mm", "thickness_mm"}.issubset(cols):
-            cur.execute("""
-                UPDATE item
-                SET length_mm = thickness_mm
-                WHERE length_mm IS NULL
-                  AND thickness_mm IS NOT NULL
-            """)
-            cur.execute("UPDATE item SET thickness_mm = NULL WHERE thickness_mm IS NOT NULL")
-    except sqlite3.OperationalError:
-        pass
-    con.commit(); con.close()
-
-def migrate_drive_to_subtype():
-    try:
-        cols = {
-            row[1]
-            for row in db.session.execute(text("PRAGMA table_info(item)")).fetchall()
-        }
-    except Exception:
-        return
-    if "drive" not in cols:
-        return
-    rows = db.session.execute(
-        text("""
-            SELECT id, category_id, subtype_id, drive
-            FROM item
-            WHERE drive IS NOT NULL
-              AND trim(drive) != ''
-        """)
-    ).fetchall()
-    if not rows:
-        return
-    for row in rows:
-        data = row._mapping
-        drive_value = (data["drive"] or "").strip()
-        if not drive_value:
-            continue
-        subtype_name = None
-        if data["subtype_id"]:
-            subtype = Subtype.query.get(data["subtype_id"])
-            base_name = subtype.name if subtype else ""
-            subtype_name = f"{base_name} {drive_value}".strip()
-        else:
-            subtype_name = drive_value
-        if not subtype_name:
-            continue
-        subtype = Subtype.query.filter_by(
-            category_id=data["category_id"],
-            name=subtype_name,
-        ).first()
-        if not subtype:
-            subtype = Subtype(category_id=data["category_id"], name=subtype_name)
-            db.session.add(subtype)
-            db.session.flush()
-        item = Item.query.get(data["id"])
-        if item:
-            item.subtype = subtype
-            item.name = auto_name_for(item)
-        db.session.execute(
-            text("UPDATE item SET drive = NULL WHERE id = :item_id"),
-            {"item_id": data["id"]},
-        )
-    db.session.commit()
-
-def migrate_standoff_config_to_subtype():
-    try:
-        cols = {
-            row[1]
-            for row in db.session.execute(text("PRAGMA table_info(item)")).fetchall()
-        }
-    except Exception:
-        return
-    if "standoff_config" not in cols:
-        return
-    rows = db.session.execute(
-        text("""
-            SELECT id, category_id, subtype_id, standoff_config
-            FROM item
-            WHERE standoff_config IS NOT NULL
-              AND trim(standoff_config) != ''
-        """)
-    ).fetchall()
-    if not rows:
-        return
-    for row in rows:
-        data = row._mapping
-        config_value = (data["standoff_config"] or "").strip()
-        if not config_value:
-            continue
-        base_name = ""
-        if data["subtype_id"]:
-            subtype = Subtype.query.get(data["subtype_id"])
-            base_name = subtype.name if subtype else ""
-        if base_name:
-            subtype_name = f"{base_name} {config_value}".strip()
-        else:
-            subtype_name = config_value
-        if not subtype_name:
-            continue
-        subtype = Subtype.query.filter_by(
-            category_id=data["category_id"],
-            name=subtype_name,
-        ).first()
-        if not subtype:
-            subtype = Subtype(category_id=data["category_id"], name=subtype_name)
-            db.session.add(subtype)
-            db.session.flush()
-        item = Item.query.get(data["id"])
-        if item:
-            item.subtype_id = subtype.id
-            item.name = auto_name_for(item)
-        db.session.execute(
-            text("UPDATE item SET standoff_config = NULL WHERE id = :item_id"),
-            {"item_id": data["id"]},
-        )
-    db.session.commit()
+# ===================== INIT / SEED =====================
 
 def seed_if_empty_or_missing():
     if not User.query.filter_by(username="admin").first():
@@ -2665,10 +2387,7 @@ def seed_if_empty_or_missing():
 def init_db():
     with app.app_context():
         db.create_all()
-        lite_migrations()
         seed_if_empty_or_missing()
-        migrate_drive_to_subtype()
-        migrate_standoff_config_to_subtype()
 
 # ===================== MAIN =====================
 if __name__ == "__main__":
