@@ -57,56 +57,6 @@
 
 <hr class="my-3">
 
-<div class="row">
-  <div class="col-lg-6">
-    <div class="form-section mb-3">
-      <h5 class="mb-2">Configurazione (Torrette)</h5>
-      <table class="table table-striped" id="tblStandoffCfgs">
-        <thead>
-          <tr><th>ID</th><th>Nome</th><th>Ordine</th><th>Azione</th></tr>
-        </thead>
-        <tbody>
-          {% for s in standoff_cfgs %}
-          <tr>
-            <td>{{ s.id }}</td>
-            <td>
-              <input class="form-control" name="name" value="{{ s.name }}" form="standoff-form-{{ s.id }}">
-            </td>
-            <td>
-              <input type="number" class="form-control" name="sort_order" value="{{ s.sort_order }}" form="standoff-form-{{ s.id }}">
-            </td>
-            <td class="text-end">
-              <form method="post" action="{{ url_for('update_standoff_config', opt_id=s.id) }}" id="standoff-form-{{ s.id }}" class="d-grid gap-1"></form>
-              <div class="d-grid gap-1">
-                <button class="btn btn-sm btn-primary" form="standoff-form-{{ s.id }}">Salva</button>
-                <button formaction="{{ url_for('delete_standoff_config', opt_id=s.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger" onclick="return confirm('Eliminare configurazione?')" form="standoff-form-{{ s.id }}">Elimina</button>
-              </div>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-
-    <div class="form-section">
-      <h5 class="mb-2">Nuova configurazione (Torrette)</h5>
-      <form method="post" action="{{ url_for('add_standoff_config') }}" class="row g-2">
-        <div class="col-md-6">
-          <input class="form-control" name="name" placeholder="Nome configurazione">
-        </div>
-        <div class="col-md-3">
-          <input type="number" class="form-control" name="sort_order" value="0">
-        </div>
-        <div class="col-md-3">
-          <button class="btn btn-primary w-100">Aggiungi</button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
-
-<hr class="my-3">
-
 <div class="form-section mb-3">
   <h5 class="mb-2">Sottotipi (forme)</h5>
 
@@ -182,7 +132,11 @@
                 </div>
                 <div class="col-md-4">
                   <button class="btn btn-sm btn-primary">Salva</button>
-                  <button formaction="{{ url_for('delete_material', mat_id=m.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger" onclick="return confirm('Eliminare materiale?')">Elimina</button>
+                  {% if m.id in used_materials %}
+                    <button class="btn btn-sm btn-outline-secondary" type="button" disabled title="Materiale in uso">Elimina</button>
+                  {% else %}
+                    <button formaction="{{ url_for('delete_material', mat_id=m.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger" onclick="return confirm('Eliminare materiale?')">Elimina</button>
+                  {% endif %}
                 </div>
               </form>
             </td>
@@ -205,7 +159,9 @@
       </form>
     </div>
   </div>
+</div>
 
+<div class="row mt-3">
   <div class="col-lg-6">
     <div class="form-section mb-3">
       <h5 class="mb-2">Finiture</h5>
@@ -224,7 +180,11 @@
                 </div>
                 <div class="col-md-4">
                   <button class="btn btn-sm btn-primary">Salva</button>
-                  <button formaction="{{ url_for('delete_finish', fin_id=f.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger" onclick="return confirm('Eliminare finitura?')">Elimina</button>
+                  {% if f.id in used_finishes %}
+                    <button class="btn btn-sm btn-outline-secondary" type="button" disabled title="Finitura in uso">Elimina</button>
+                  {% else %}
+                    <button formaction="{{ url_for('delete_finish', fin_id=f.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger" onclick="return confirm('Eliminare finitura?')">Elimina</button>
+                  {% endif %}
                 </div>
               </form>
             </td>
@@ -256,7 +216,6 @@ $(function(){
     $('#tblSubtypes').DataTable({pageLength:50, order:[[0,'asc']]});
     $('#tblMaterials').DataTable({pageLength:50, order:[[0,'asc']]});
     $('#tblFinishes').DataTable({pageLength:50, order:[[0,'asc']]});
-    $('#tblStandoffCfgs').DataTable({pageLength:50, order:[[0,'asc']]});
   }
 });
 </script>
