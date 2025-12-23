@@ -283,6 +283,7 @@
 {% if is_admin %}
 const UNPLACED = {{ unplaced_json|tojson }};
 const CLEAR_URL_TEMPLATE = '{{ url_for("slot_clear_item", item_id=0) }}';
+const MQTT_PUBLISH_URL = '{{ url_for("mqtt_publish_slot") }}';
 
 function openAssignModal(col, row, catFilter){
   const modal = new bootstrap.Modal(document.getElementById('assignModal'));
@@ -404,6 +405,17 @@ function openSlotModal(col, row){
   modal.show();
 }
 
+function publishSlotMqtt(col, row) {
+  const grid = document.getElementById('grid');
+  const cabId = document.getElementById('cab_id')?.value || grid?.dataset.cab;
+  if (!cabId || !MQTT_PUBLISH_URL) return;
+  fetch(MQTT_PUBLISH_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cabinet_id: cabId, col_code: col, row_num: row })
+  }).catch(() => {});
+}
+
 document.addEventListener('DOMContentLoaded', function(){
   const grid = document.getElementById('grid');
   if (!grid) return;
@@ -434,6 +446,8 @@ document.addEventListener('DOMContentLoaded', function(){
 
     if (!col || !row) return;
     if (cat === 'blocked') { alert('Cella bloccata.'); return; }
+
+    publishSlotMqtt(col, row);
 
     if (td.classList.contains('cell-used')) {
       openSlotModal(col, row);

@@ -3,6 +3,8 @@ from flask import Flask, render_template, redirect, url_for, request, jsonify, f
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from sqlalchemy import func, select, or_, text
+from datetime import datetime, timezone
+import json
 import os, io
 
 # ===================== DEFAULT ETICHETTE =====================
@@ -14,6 +16,11 @@ DEFAULT_GAP_MM     = 1
 DEFAULT_ORIENTATION_LANDSCAPE = True
 DEFAULT_QR_DEFAULT = True
 DEFAULT_QR_BASE_URL = None  # es. "https://magazzino.local"
+DEFAULT_MQTT_HOST = "localhost"
+DEFAULT_MQTT_PORT = 1883
+DEFAULT_MQTT_TOPIC = "magazzino/slot"
+DEFAULT_MQTT_QOS = 0
+DEFAULT_MQTT_RETAIN = False
 
 def mm_to_pt(mm): return mm * 2.8346456693
 
@@ -45,6 +52,35 @@ class Settings(db.Model):
     orientation_landscape = db.Column(db.Boolean, nullable=False, default=DEFAULT_ORIENTATION_LANDSCAPE)
     qr_default = db.Column(db.Boolean, nullable=False, default=DEFAULT_QR_DEFAULT)
     qr_base_url = db.Column(db.String(200), nullable=True)
+
+class MqttSettings(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    enabled = db.Column(db.Boolean, nullable=False, default=False)
+    host = db.Column(db.String(200), nullable=True)
+    port = db.Column(db.Integer, nullable=False, default=DEFAULT_MQTT_PORT)
+    username = db.Column(db.String(200), nullable=True)
+    password = db.Column(db.String(200), nullable=True)
+    topic = db.Column(db.String(200), nullable=True)
+    qos = db.Column(db.Integer, nullable=False, default=DEFAULT_MQTT_QOS)
+    retain = db.Column(db.Boolean, nullable=False, default=DEFAULT_MQTT_RETAIN)
+    client_id = db.Column(db.String(120), nullable=True)
+    include_cabinet_name = db.Column(db.Boolean, nullable=False, default=True)
+    include_cabinet_id = db.Column(db.Boolean, nullable=False, default=True)
+    include_location_name = db.Column(db.Boolean, nullable=False, default=True)
+    include_location_id = db.Column(db.Boolean, nullable=False, default=False)
+    include_row = db.Column(db.Boolean, nullable=False, default=True)
+    include_col = db.Column(db.Boolean, nullable=False, default=True)
+    include_slot_label = db.Column(db.Boolean, nullable=False, default=True)
+    include_items = db.Column(db.Boolean, nullable=False, default=True)
+    include_item_id = db.Column(db.Boolean, nullable=False, default=True)
+    include_item_name = db.Column(db.Boolean, nullable=False, default=True)
+    include_item_category = db.Column(db.Boolean, nullable=False, default=True)
+    include_item_quantity = db.Column(db.Boolean, nullable=False, default=True)
+    include_item_position = db.Column(db.Boolean, nullable=False, default=True)
+    include_item_description = db.Column(db.Boolean, nullable=False, default=False)
+    include_item_material = db.Column(db.Boolean, nullable=False, default=False)
+    include_item_finish = db.Column(db.Boolean, nullable=False, default=False)
+    include_empty = db.Column(db.Boolean, nullable=False, default=True)
 
 class Category(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -301,6 +337,120 @@ def get_settings()->Settings:
                      qr_base_url=DEFAULT_QR_BASE_URL)
         db.session.add(s); db.session.commit()
     return s
+
+def get_mqtt_settings() -> MqttSettings:
+    s = MqttSettings.query.get(1)
+    if not s:
+        s = MqttSettings(
+            id=1,
+            enabled=False,
+            host=DEFAULT_MQTT_HOST,
+            port=DEFAULT_MQTT_PORT,
+            topic=DEFAULT_MQTT_TOPIC,
+            qos=DEFAULT_MQTT_QOS,
+            retain=DEFAULT_MQTT_RETAIN,
+        )
+        db.session.add(s)
+        db.session.commit()
+    return s
+
+def mqtt_payload_for_slot(cabinet: Cabinet, col_code: str, row_num: int, settings: MqttSettings):
+    if not cabinet:
+        return None
+    location = Location.query.get(cabinet.location_id) if cabinet else None
+    payload = {
+        "event": "slot_click",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if settings.include_cabinet_name:
+        payload["cabinet_name"] = cabinet.name if cabinet else None
+    if settings.include_cabinet_id:
+        payload["cabinet_id"] = cabinet.id if cabinet else None
+    if settings.include_location_name:
+        payload["location_name"] = location.name if location else None
+    if settings.include_location_id:
+        payload["location_id"] = location.id if location else None
+    if settings.include_row:
+        payload["row"] = row_num
+    if settings.include_col:
+        payload["col"] = col_code
+    if settings.include_slot_label:
+        payload["slot"] = f"{col_code}{row_num}"
+
+    if settings.include_items:
+        region = merge_region_for(cabinet.id, col_code, row_num)
+        if region:
+            cells = merge_cells_from_region(region)
+        else:
+            cells = [(col_code, row_num)]
+        slots = (
+            Slot.query.filter(Slot.cabinet_id == cabinet.id)
+            .filter(or_(*[
+                (Slot.col_code == col) & (Slot.row_num == row)
+                for col, row in cells
+            ]))
+            .all()
+        )
+        items_payload = []
+        if slots:
+            slot_ids = [s.id for s in slots]
+            assigns = (
+                db.session.query(Assignment, Item, Category, Slot)
+                .join(Item, Assignment.item_id == Item.id)
+                .join(Category, Item.category_id == Category.id, isouter=True)
+                .join(Slot, Assignment.slot_id == Slot.id)
+                .filter(Assignment.slot_id.in_(slot_ids))
+                .order_by(Slot.col_code, Slot.row_num, Assignment.compartment_no)
+                .all()
+            )
+            for a, it, cat, slot in assigns:
+                item_data = {}
+                if settings.include_item_id:
+                    item_data["id"] = it.id
+                if settings.include_item_name:
+                    item_data["name"] = auto_name_for(it)
+                if settings.include_item_category:
+                    item_data["category"] = cat.name if cat else None
+                if settings.include_item_quantity:
+                    item_data["quantity"] = it.quantity
+                if settings.include_item_position:
+                    item_data["position"] = f"{slot.col_code}{slot.row_num}"
+                if settings.include_item_description:
+                    item_data["description"] = it.description
+                if settings.include_item_material:
+                    item_data["material"] = it.material.name if it.material else None
+                if settings.include_item_finish:
+                    item_data["finish"] = it.finish.name if it.finish else None
+                items_payload.append(item_data)
+        if items_payload or settings.include_empty:
+            payload["items"] = items_payload
+        else:
+            return None
+    return payload
+
+def publish_mqtt_payload(payload: dict, settings: MqttSettings):
+    if not settings.enabled:
+        return {"ok": False, "skipped": True, "error": "MQTT disabilitato."}
+    if not settings.host or not settings.topic:
+        return {"ok": False, "error": "Configurazione MQTT incompleta."}
+    from paho.mqtt import publish as mqtt_publish
+    auth = None
+    if settings.username:
+        auth = {"username": settings.username, "password": settings.password or ""}
+    try:
+        mqtt_publish.single(
+            settings.topic,
+            json.dumps(payload, ensure_ascii=False),
+            hostname=settings.host,
+            port=settings.port or DEFAULT_MQTT_PORT,
+            qos=settings.qos or DEFAULT_MQTT_QOS,
+            retain=bool(settings.retain),
+            client_id=settings.client_id or None,
+            auth=auth,
+        )
+        return {"ok": True}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
 
 @app.context_processor
 def inject_utils():
@@ -1210,6 +1360,7 @@ def admin_config():
         cabinets=cabinets,
         drawer_merges=drawer_merges,
         settings=get_settings(),
+        mqtt_settings=get_mqtt_settings(),
         categories=categories,
         custom_fields=serialized_custom_fields,
         field_defs=field_defs,
@@ -1313,6 +1464,48 @@ def update_settings():
         flash("Impostazioni aggiornate.", "success")
     except Exception as e:
         db.session.rollback(); flash(f"Errore salvataggio: {e}", "danger")
+    return redirect(url_for("admin_config"))
+
+@app.route("/admin/mqtt/update", methods=["POST"])
+@login_required
+def update_mqtt_settings():
+    s = get_mqtt_settings()
+    try:
+        s.enabled = bool(request.form.get("enabled"))
+        s.host = (request.form.get("host") or "").strip() or None
+        s.port = int(request.form.get("port") or DEFAULT_MQTT_PORT)
+        s.username = (request.form.get("username") or "").strip() or None
+        password = request.form.get("password") or ""
+        if password:
+            s.password = password
+        if request.form.get("clear_password"):
+            s.password = None
+        s.topic = (request.form.get("topic") or "").strip() or None
+        s.qos = int(request.form.get("qos") or DEFAULT_MQTT_QOS)
+        s.retain = bool(request.form.get("retain"))
+        s.client_id = (request.form.get("client_id") or "").strip() or None
+        s.include_cabinet_name = bool(request.form.get("include_cabinet_name"))
+        s.include_cabinet_id = bool(request.form.get("include_cabinet_id"))
+        s.include_location_name = bool(request.form.get("include_location_name"))
+        s.include_location_id = bool(request.form.get("include_location_id"))
+        s.include_row = bool(request.form.get("include_row"))
+        s.include_col = bool(request.form.get("include_col"))
+        s.include_slot_label = bool(request.form.get("include_slot_label"))
+        s.include_items = bool(request.form.get("include_items"))
+        s.include_item_id = bool(request.form.get("include_item_id"))
+        s.include_item_name = bool(request.form.get("include_item_name"))
+        s.include_item_category = bool(request.form.get("include_item_category"))
+        s.include_item_quantity = bool(request.form.get("include_item_quantity"))
+        s.include_item_position = bool(request.form.get("include_item_position"))
+        s.include_item_description = bool(request.form.get("include_item_description"))
+        s.include_item_material = bool(request.form.get("include_item_material"))
+        s.include_item_finish = bool(request.form.get("include_item_finish"))
+        s.include_empty = bool(request.form.get("include_empty"))
+        db.session.commit()
+        flash("Configurazione MQTT aggiornata.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Errore salvataggio MQTT: {e}", "danger")
     return redirect(url_for("admin_config"))
 
 @app.route("/admin/locations/add", methods=["POST"])
@@ -1641,6 +1834,33 @@ def slot_items():
             "position": f"{slot.col_code}{slot.row_num}",
         })
     return jsonify({"ok": True, "items": items})
+
+@app.route("/admin/mqtt/publish_slot", methods=["POST"])
+@login_required
+def mqtt_publish_slot():
+    payload = request.get_json(silent=True) or {}
+    cab_id = payload.get("cabinet_id")
+    col_code = (payload.get("col_code") or "").strip().upper()
+    row_num = payload.get("row_num")
+    try:
+        cab_id = int(cab_id)
+        row_num = int(row_num)
+    except Exception:
+        return jsonify({"ok": False, "error": "Parametri non validi."}), 400
+    if not col_code:
+        return jsonify({"ok": False, "error": "Colonna non valida."}), 400
+    cabinet = Cabinet.query.get(cab_id)
+    if not cabinet:
+        return jsonify({"ok": False, "error": "Cassettiera non trovata."}), 404
+    settings = get_mqtt_settings()
+    mqtt_payload = mqtt_payload_for_slot(cabinet, col_code, row_num, settings)
+    if mqtt_payload is None:
+        return jsonify({"ok": False, "skipped": True, "error": "Nessun contenuto da pubblicare."}), 200
+    result = publish_mqtt_payload(mqtt_payload, settings)
+    status = 200 if result.get("ok") else 500
+    if result.get("skipped"):
+        status = 200
+    return jsonify(result), status
 
 
 @app.route("/admin/slot_items/<int:item_id>/clear", methods=["POST"])
