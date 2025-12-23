@@ -1,5 +1,80 @@
 {% extends "base.html" %}
 {% block content %}
+<h4>Griglia cassettiera</h4>
+<form class="row g-2 mb-2">
+  <div class="col-md-4">
+    <select name="cabinet_id" class="form-select" onchange="this.form.submit()">
+      {% for c in cabinets %}
+        <option value="{{ c.id }}" {{ 'selected' if c.id==selected_cab_id else '' }}>{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+</form>
+
+<div class="legend mb-2">
+  <span style="background:black"></span> Bloccata
+  {% for c in categories %}
+    <span style="background:{{ c.color }}; margin-left:12px;"></span> {{ c.name }}
+  {% endfor %}
+</div>
+
+<div class="grid-wrap p-2">
+  {% if grid.rows and grid.cols %}
+  <table class="grid-table" id="grid" data-cab="{{ grid.cab.id }}" data-comp="{{ grid.cab.comp }}">
+    <thead>
+      <tr>
+        <th class="rowhdr">r\\c</th>
+        {% for col in grid.cols %}
+          <th>{{ col }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in grid.rows %}
+      <tr>
+        <th class="rowhdr">{{ r }}</th>
+        {% for col in grid.cols %}
+          {% set key = col ~ '-' ~ r %}
+          {% if grid.merge_skips and grid.merge_skips.get(key) %}
+          {% else %}
+            {% set cell = grid.cells.get(key) %}
+            {% set merge = grid.merge_anchors.get(key) if grid.merge_anchors else None %}
+            {% if not cell %}
+              <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="">
+                <div class="cell-inner" style="color:#777; text-shadow:none; font-weight:500;">&nbsp;</div>
+              </td>
+            {% else %}
+              {% if cell.blocked %}
+                <td class="cell-blocked" data-col="{{ col }}" data-row="{{ r }}" data-cat="blocked" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>—</td>
+              {% elif cell.entries and (cell.entries|length)>0 %}
+                {% set colhex = cell.entries[0].color %}
+                {% set texts = (cell.entries | map(attribute='text') | list) %}
+                <td class="cell-used" style="background: {{ colhex }}" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
+                  <div class="cell-inner">
+                    {% if texts|length>0 %}<div>{{ texts[0] }}</div>{% endif %}
+                    {% if texts|length>1 %}<div>{{ texts[1] }}</div>{% endif %}
+                    {% if texts|length>2 %}<div>+{{ texts|length-2 }}</div>{% endif %}
+                  </div>
+                </td>
+              {% else %}
+                <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
+                  <div class="cell-inner" style="color:#777; text-shadow:none; font-weight:500;">&nbsp;</div>
+                </td>
+              {% endif %}
+            {% endif %}
+          {% endif %}
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <div class="text-muted p-3">Configura una cassettiera per visualizzare la griglia.</div>
+  {% endif %}
+</div>
+
+<hr class="my-4">
+
 <div class="row g-3 mb-3">
   <div class="col-lg-3 col-md-6">
     <div class="kpi-card h-100">
@@ -137,81 +212,6 @@
   });
 </script>
 
-<hr class="my-4">
-
-<h4>Griglia cassettiera</h4>
-<form class="row g-2 mb-2">
-  <div class="col-md-4">
-    <select name="cabinet_id" class="form-select" onchange="this.form.submit()">
-      {% for c in cabinets %}
-        <option value="{{ c.id }}" {{ 'selected' if c.id==selected_cab_id else '' }}>{{ c.name }}</option>
-      {% endfor %}
-    </select>
-  </div>
-</form>
-
-<div class="legend mb-2">
-  <span style="background:black"></span> Bloccata
-  {% for c in categories %}
-    <span style="background:{{ c.color }}; margin-left:12px;"></span> {{ c.name }}
-  {% endfor %}
-</div>
-
-<div class="grid-wrap p-2">
-  {% if grid.rows and grid.cols %}
-  <table class="grid-table" id="grid" data-cab="{{ grid.cab.id }}" data-comp="{{ grid.cab.comp }}">
-    <thead>
-      <tr>
-        <th class="rowhdr">r\\c</th>
-        {% for col in grid.cols %}
-          <th>{{ col }}</th>
-        {% endfor %}
-      </tr>
-    </thead>
-    <tbody>
-      {% for r in grid.rows %}
-      <tr>
-        <th class="rowhdr">{{ r }}</th>
-        {% for col in grid.cols %}
-          {% set key = col ~ '-' ~ r %}
-          {% if grid.merge_skips and grid.merge_skips.get(key) %}
-          {% else %}
-            {% set cell = grid.cells.get(key) %}
-            {% set merge = grid.merge_anchors.get(key) if grid.merge_anchors else None %}
-            {% if not cell %}
-              <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="">
-                <div class="cell-inner" style="color:#777; text-shadow:none; font-weight:500;">&nbsp;</div>
-              </td>
-            {% else %}
-              {% if cell.blocked %}
-                <td class="cell-blocked" data-col="{{ col }}" data-row="{{ r }}" data-cat="blocked" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>—</td>
-              {% elif cell.entries and (cell.entries|length)>0 %}
-                {% set colhex = cell.entries[0].color %}
-                {% set texts = (cell.entries | map(attribute='text') | list) %}
-                <td class="cell-used" style="background: {{ colhex }}" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
-                  <div class="cell-inner">
-                    {% if texts|length>0 %}<div>{{ texts[0] }}</div>{% endif %}
-                    {% if texts|length>1 %}<div>{{ texts[1] }}</div>{% endif %}
-                    {% if texts|length>2 %}<div>+{{ texts|length-2 }}</div>{% endif %}
-                  </div>
-                </td>
-              {% else %}
-                <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
-                  <div class="cell-inner" style="color:#777; text-shadow:none; font-weight:500;">&nbsp;</div>
-                </td>
-              {% endif %}
-            {% endif %}
-          {% endif %}
-        {% endfor %}
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-    <div class="text-muted p-3">Configura una cassettiera per visualizzare la griglia.</div>
-  {% endif %}
-</div>
-
 {% if is_admin %}
 <!-- Modal assegnazione -->
 <div class="modal fade" id="assignModal" tabindex="-1" aria-hidden="true">
@@ -280,10 +280,11 @@
 
 
 <script>
+const MQTT_PUBLISH_URL = '{{ url_for("mqtt_publish_slot") }}';
+const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
 {% if is_admin %}
 const UNPLACED = {{ unplaced_json|tojson }};
 const CLEAR_URL_TEMPLATE = '{{ url_for("slot_clear_item", item_id=0) }}';
-const MQTT_PUBLISH_URL = '{{ url_for("mqtt_publish_slot") }}';
 
 function openAssignModal(col, row, catFilter){
   const modal = new bootstrap.Modal(document.getElementById('assignModal'));
@@ -405,6 +406,8 @@ function openSlotModal(col, row){
   modal.show();
 }
 
+{% endif %}
+
 function publishSlotMqtt(col, row) {
   const grid = document.getElementById('grid');
   const cabId = document.getElementById('cab_id')?.value || grid?.dataset.cab;
@@ -419,7 +422,9 @@ function publishSlotMqtt(col, row) {
 document.addEventListener('DOMContentLoaded', function(){
   const grid = document.getElementById('grid');
   if (!grid) return;
+  let pendingUsedCell = null;
 
+  {% if is_admin %}
   const assignModalEl = document.getElementById('assignModal');
   assignModalEl?.addEventListener('shown.bs.modal', () => {
     document.getElementById('flt')?.focus();
@@ -429,6 +434,7 @@ document.addEventListener('DOMContentLoaded', function(){
   slotModalEl?.addEventListener('shown.bs.modal', () => {
     document.getElementById('slotItemsTable')?.scrollIntoView({ block: 'nearest' });
   });
+  {% endif %}
 
   // Click su cella:
   //  - cella bloccata → avviso
@@ -438,7 +444,6 @@ document.addEventListener('DOMContentLoaded', function(){
     const td = e.target.closest('td');
     if (!td) return;
     if (td.classList.contains('cell-blocked')) { alert('Cella bloccata.'); return; }
-    if (!{{ 'true' if is_admin else 'false' }}) return;
 
     const col = td.dataset.col;
     const row = td.dataset.row;
@@ -449,13 +454,26 @@ document.addEventListener('DOMContentLoaded', function(){
 
     publishSlotMqtt(col, row);
 
+    if (!IS_ADMIN) {
+      pendingUsedCell = null;
+      return;
+    }
+
+    const cellKey = `${col}-${row}`;
     if (td.classList.contains('cell-used')) {
-      openSlotModal(col, row);
+      if (pendingUsedCell === cellKey) {
+        pendingUsedCell = null;
+        openSlotModal(col, row);
+      } else {
+        pendingUsedCell = cellKey;
+      }
     } else {
+      pendingUsedCell = null;
       openAssignModal(col, row, cat || null);
     }
   });
 
+  {% if is_admin %}
   // Filtro lista articoli non assegnati
   document.getElementById('flt')?.addEventListener('input', function(){
     const term = this.value.toLowerCase();
@@ -521,7 +539,7 @@ document.addEventListener('DOMContentLoaded', function(){
       openAssignModal(col, row, null);
     });
   }
+  {% endif %}
 });
-{% endif %}
 </script>
 {% endblock %}
