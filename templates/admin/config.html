@@ -5,6 +5,7 @@
   <ul class="nav nav-pills flex-wrap gap-2">
     <li class="nav-item"><a class="nav-link" href="#campi-categoria">Campi per categoria</a></li>
     <li class="nav-item"><a class="nav-link" href="#stampa-etichette">Stampa etichette & QR</a></li>
+    <li class="nav-item"><a class="nav-link" href="#mqtt">MQTT</a></li>
     <li class="nav-item"><a class="nav-link" href="#campi-personalizzati">Campi personalizzati</a></li>
     <li class="nav-item"><a class="nav-link" href="#ubicazioni">Ubicazioni</a></li>
     <li class="nav-item"><a class="nav-link" href="#cassettiere">Cassettiere</a></li>
@@ -81,6 +82,146 @@
           <small class="text-muted">Se vuoto, uso l'host corrente.</small>
         </div>
         <div class="col-12 text-end mt-2"><button class="btn btn-primary">Salva impostazioni</button></div>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="form-section" id="mqtt">
+      <h5>MQTT</h5>
+      <form method="post" action="{{ url_for('update_mqtt_settings') }}" class="row g-2">
+        <div class="col-12">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="enabled" id="mqtt_enabled" {{ 'checked' if mqtt_settings.enabled else '' }}>
+            <label class="form-check-label" for="mqtt_enabled">Abilita pubblicazione MQTT</label>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Host</label>
+          <input class="form-control" name="host" placeholder="broker.local" value="{{ mqtt_settings.host or '' }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Porta</label>
+          <input type="number" min="1" max="65535" class="form-control" name="port" value="{{ mqtt_settings.port }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">QoS</label>
+          <select class="form-select" name="qos">
+            <option value="0" {{ 'selected' if mqtt_settings.qos == 0 else '' }}>0</option>
+            <option value="1" {{ 'selected' if mqtt_settings.qos == 1 else '' }}>1</option>
+            <option value="2" {{ 'selected' if mqtt_settings.qos == 2 else '' }}>2</option>
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Topic</label>
+          <input class="form-control" name="topic" placeholder="magazzino/slot" value="{{ mqtt_settings.topic or '' }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Client ID (opz.)</label>
+          <input class="form-control" name="client_id" placeholder="magazzino-ui" value="{{ mqtt_settings.client_id or '' }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Username (opz.)</label>
+          <input class="form-control" name="username" value="{{ mqtt_settings.username or '' }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Password (opz.)</label>
+          <input type="password" class="form-control" name="password" placeholder="Lascia vuoto per non cambiare">
+        </div>
+        <div class="col-12">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="clear_password" id="mqtt_clear_password">
+            <label class="form-check-label" for="mqtt_clear_password">Cancella password salvata</label>
+          </div>
+        </div>
+        <div class="col-12">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="retain" id="mqtt_retain" {{ 'checked' if mqtt_settings.retain else '' }}>
+            <label class="form-check-label" for="mqtt_retain">Messaggio retain</label>
+          </div>
+        </div>
+
+        <div class="col-12 mt-3">
+          <h6 class="mb-2">Cosa pubblicare</h6>
+        </div>
+        <div class="col-md-4">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="include_cabinet_name" id="mqtt_include_cabinet_name" {{ 'checked' if mqtt_settings.include_cabinet_name else '' }}>
+            <label class="form-check-label" for="mqtt_include_cabinet_name">Nome cassettiera</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="include_cabinet_id" id="mqtt_include_cabinet_id" {{ 'checked' if mqtt_settings.include_cabinet_id else '' }}>
+            <label class="form-check-label" for="mqtt_include_cabinet_id">ID cassettiera</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="include_location_name" id="mqtt_include_location_name" {{ 'checked' if mqtt_settings.include_location_name else '' }}>
+            <label class="form-check-label" for="mqtt_include_location_name">Nome ubicazione</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="include_location_id" id="mqtt_include_location_id" {{ 'checked' if mqtt_settings.include_location_id else '' }}>
+            <label class="form-check-label" for="mqtt_include_location_id">ID ubicazione</label>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="include_row" id="mqtt_include_row" {{ 'checked' if mqtt_settings.include_row else '' }}>
+            <label class="form-check-label" for="mqtt_include_row">Riga selezionata</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="include_col" id="mqtt_include_col" {{ 'checked' if mqtt_settings.include_col else '' }}>
+            <label class="form-check-label" for="mqtt_include_col">Colonna selezionata</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="include_slot_label" id="mqtt_include_slot_label" {{ 'checked' if mqtt_settings.include_slot_label else '' }}>
+            <label class="form-check-label" for="mqtt_include_slot_label">Etichetta cella (es. A1)</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="include_empty" id="mqtt_include_empty" {{ 'checked' if mqtt_settings.include_empty else '' }}>
+            <label class="form-check-label" for="mqtt_include_empty">Pubblica anche se la cella è vuota</label>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="include_items" id="mqtt_include_items" {{ 'checked' if mqtt_settings.include_items else '' }}>
+            <label class="form-check-label" for="mqtt_include_items">Lista articoli nella cella</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="include_item_id" id="mqtt_include_item_id" {{ 'checked' if mqtt_settings.include_item_id else '' }}>
+            <label class="form-check-label" for="mqtt_include_item_id">ID articolo</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="include_item_name" id="mqtt_include_item_name" {{ 'checked' if mqtt_settings.include_item_name else '' }}>
+            <label class="form-check-label" for="mqtt_include_item_name">Nome articolo</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="include_item_category" id="mqtt_include_item_category" {{ 'checked' if mqtt_settings.include_item_category else '' }}>
+            <label class="form-check-label" for="mqtt_include_item_category">Categoria</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="include_item_quantity" id="mqtt_include_item_quantity" {{ 'checked' if mqtt_settings.include_item_quantity else '' }}>
+            <label class="form-check-label" for="mqtt_include_item_quantity">Quantità</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="include_item_position" id="mqtt_include_item_position" {{ 'checked' if mqtt_settings.include_item_position else '' }}>
+            <label class="form-check-label" for="mqtt_include_item_position">Posizione articolo</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="include_item_description" id="mqtt_include_item_description" {{ 'checked' if mqtt_settings.include_item_description else '' }}>
+            <label class="form-check-label" for="mqtt_include_item_description">Descrizione articolo</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="include_item_material" id="mqtt_include_item_material" {{ 'checked' if mqtt_settings.include_item_material else '' }}>
+            <label class="form-check-label" for="mqtt_include_item_material">Materiale articolo</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="include_item_finish" id="mqtt_include_item_finish" {{ 'checked' if mqtt_settings.include_item_finish else '' }}>
+            <label class="form-check-label" for="mqtt_include_item_finish">Finitura articolo</label>
+          </div>
+        </div>
+
+        <div class="col-12 text-end mt-2">
+          <button class="btn btn-primary">Salva configurazione MQTT</button>
+        </div>
       </form>
     </div>
   </div>
