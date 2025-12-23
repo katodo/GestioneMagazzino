@@ -84,14 +84,6 @@
         {% endfor %}
       </div>
 
-      <div class="col-md-4 field-block" data-field-key="standoff_config">
-        <label class="form-label">Configurazione (Torrette)</label>
-        <select class="form-select" name="standoff_config" id="standoffSel">
-          <option value="">—</option>
-          {% for d in standoff_cfgs %}<option value="{{ d.name }}">{{ d.name }}</option>{% endfor %}
-        </select>
-      </div>
-
       <div class="col-md-4 field-block" data-field-key="outer_d_mm">
         <label class="form-label">Ø esterno (mm)</label>
         <input type="number" step="0.01" class="form-control" name="outer_d_mm">

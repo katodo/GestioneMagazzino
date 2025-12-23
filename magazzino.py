@@ -73,11 +73,6 @@ class ThreadSize(db.Model):
     __table_args__ = (db.UniqueConstraint('standard_id', 'value', name='uq_size_per_standard'),)
     standard = db.relationship("ThreadStandard")
 
-class StandoffConfigOption(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(32), unique=True, nullable=False)
-    sort_order = db.Column(db.Integer, nullable=False, default=0)
-
 class CustomField(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(80), unique=True, nullable=False)
@@ -150,8 +145,6 @@ class Item(db.Model):
     thickness_mm    = db.Column(db.Float, nullable=True)      # spessore (rondelle)
     length_mm       = db.Column(db.Float, nullable=True)      # lunghezza
     outer_d_mm      = db.Column(db.Float, nullable=True)      # Ø esterno
-    # nuovi campi specifici
-    standoff_config = db.Column(db.String(16), nullable=True) # M/F, F/F, M/M, Passante (Torrette)
     # materiali/quantità
     material_id     = db.Column(db.Integer, db.ForeignKey("material.id"), nullable=True)
     finish_id       = db.Column(db.Integer, db.ForeignKey("finish.id"), nullable=True)
@@ -281,9 +274,6 @@ def auto_name_for(item:Item)->str:
     parts=[]
     if item.category: parts.append(item.category.name)
     if item.subtype: parts.append(item.subtype.name)  # forma testa / forma torrette
-    # attributi specifici
-    if is_standoff(item) and item.standoff_config:
-        parts.append(item.standoff_config)
     if item.thread_size: parts.append(item.thread_size)
     size_value = None
     tag = None
@@ -328,17 +318,12 @@ def load_form_options():
     sizes_by_standard = {}
     for size in thread_sizes:
         sizes_by_standard.setdefault(size.standard.code, []).append(size.value)
-    standoff_cfgs = StandoffConfigOption.query.order_by(
-        StandoffConfigOption.sort_order,
-        StandoffConfigOption.name,
-    ).all()
-    return thread_standards, sizes_by_standard, standoff_cfgs
+    return thread_standards, sizes_by_standard
 
 BUILTIN_FIELD_DEFS = [
     {"key": "subtype_id", "label": "Sottotipo (forma)"},
     {"key": "thread_standard", "label": "Standard"},
     {"key": "thread_size", "label": "Misura"},
-    {"key": "standoff_config", "label": "Configurazione torrette"},
     {"key": "outer_d_mm", "label": "Ø esterno (mm)"},
     {"key": "length_mm", "label": "Lunghezza/Spessore (mm)"},
     {"key": "inner_d_mm", "label": "Ø interno (mm)"},
@@ -377,8 +362,6 @@ def default_fields_for_category(cat_name: str) -> set:
         base.add("outer_d_mm")
     if lower == "rondelle":
         base.update({"inner_d_mm", "length_mm"})
-    if lower == "torrette":
-        base.add("standoff_config")
     return base
 
 def serialize_custom_fields(fields):
@@ -405,6 +388,7 @@ def build_category_field_map(categories):
             enabled_by_cat.setdefault(setting.category_id, set()).add(setting.field_key)
     for cat_id, enabled_fields in enabled_by_cat.items():
         enabled_fields.discard("drive")
+        enabled_fields.discard("standoff_config")
         if "thickness_mm" in enabled_fields:
             enabled_fields.add("length_mm")
     for cat in categories:
@@ -673,9 +657,6 @@ def short_cell_text(item: Item) -> str:
         else:
             parts.append(f"Øe{vv}")
 
-    if is_standoff(item) and item.standoff_config:
-        parts.append(item.standoff_config)
-
     if not parts:
         parts.append(auto_name_for(item))
 
@@ -711,7 +692,6 @@ def api_item(item_id):
         "material": item.material.name if item.material else None,
         "finish": item.finish.name if item.finish else None,
         "quantity": item.quantity,
-        "standoff_config": item.standoff_config,
         "position": full_pos
     })
 
@@ -735,7 +715,7 @@ def admin_items():
     )
     pos_by_item = {a.item_id: make_full_position(a.name, a.col_code, a.row_num) for a in assignments}
 
-    thread_standards, sizes_by_standard, standoff_cfgs = load_form_options()
+    thread_standards, sizes_by_standard = load_form_options()
     default_standard_code = next(
         (s.code for s in thread_standards if s.code == "M"),
         thread_standards[0].code if thread_standards else "",
@@ -763,7 +743,6 @@ def admin_items():
         thread_standards=thread_standards,
         sizes_by_standard=sizes_by_standard,
         default_standard_code=default_standard_code,
-        standoff_cfgs=standoff_cfgs,
         pos_by_item=pos_by_item,
         custom_fields=serialized_custom_fields,
         category_fields=category_fields,
@@ -798,7 +777,6 @@ def add_item():
         outer_d_mm=float(f.get("outer_d_mm")) if f.get("outer_d_mm") else None,
         inner_d_mm=float(f.get("inner_d_mm")) if f.get("inner_d_mm") else None,
         thickness_mm=thickness_mm,
-        standoff_config=f.get("standoff_config") or None,
         material_id=int(f.get("material_id")) if f.get("material_id") else None,
         finish_id=int(f.get("finish_id")) if f.get("finish_id") else None,
         quantity=int(f.get("quantity")) if f.get("quantity") else 0,
@@ -835,7 +813,6 @@ def edit_item(item_id):
         item.outer_d_mm = float(f.get("outer_d_mm")) if f.get("outer_d_mm") else None
         item.inner_d_mm = float(f.get("inner_d_mm")) if f.get("inner_d_mm") else None
         item.thickness_mm = thickness_mm
-        item.standoff_config = f.get("standoff_config") or None
         item.material_id = int(f.get("material_id")) if f.get("material_id") else None
         item.finish_id = int(f.get("finish_id")) if f.get("finish_id") else None
         item.quantity = int(f.get("quantity")) if f.get("quantity") else 0
@@ -861,7 +838,7 @@ def edit_item(item_id):
     for s in subtypes:
         subtypes_by_cat.setdefault(s.category_id, []).append({"id": s.id, "name": s.name})
 
-    thread_standards, sizes_by_standard, standoff_cfgs = load_form_options()
+    thread_standards, sizes_by_standard = load_form_options()
 
     pos = (db.session.query(Assignment, Slot, Cabinet)
            .join(Slot, Assignment.slot_id == Slot.id)
@@ -881,7 +858,6 @@ def edit_item(item_id):
         item=item, categories=categories, materials=materials, finishes=finishes,
         cabinets=cabinets, subtypes_by_cat=subtypes_by_cat,
         thread_standards=thread_standards, sizes_by_standard=sizes_by_standard,
-        standoff_cfgs=standoff_cfgs,
         custom_fields=serialized_custom_fields,
         custom_field_values=custom_field_values,
         category_fields=category_fields
@@ -983,10 +959,6 @@ def admin_categories():
     categories = Category.query.order_by(Category.name).all()
     materials  = Material.query.order_by(Material.name).all()
     finishes   = Finish.query.order_by(Finish.name).all()
-    standoff_cfgs = StandoffConfigOption.query.order_by(
-        StandoffConfigOption.sort_order,
-        StandoffConfigOption.name,
-    ).all()
     # elenco sottotipi con categoria associata (per mostrare ed editare)
     subtypes   = (
         db.session.query(Subtype, Category)
@@ -1001,14 +973,29 @@ def admin_categories():
         .distinct()
         .all()
     }
+    used_materials = {
+        material_id
+        for (material_id,) in db.session.query(Item.material_id)
+        .filter(Item.material_id.isnot(None))
+        .distinct()
+        .all()
+    }
+    used_finishes = {
+        finish_id
+        for (finish_id,) in db.session.query(Item.finish_id)
+        .filter(Item.finish_id.isnot(None))
+        .distinct()
+        .all()
+    }
     return render_template(
         "admin/categories.html",
         categories=categories,
         materials=materials,
         finishes=finishes,
-        standoff_cfgs=standoff_cfgs,
         subtypes=subtypes,
         used_subtypes=used_subtypes,
+        used_materials=used_materials,
+        used_finishes=used_finishes,
     )
 
 @app.route("/admin/categories/add", methods=["POST"])
@@ -1204,56 +1191,6 @@ def delete_finish(fin_id):
         db.session.delete(fin)
         db.session.commit()
         flash("Finitura eliminata.", "success")
-    return redirect(url_for("admin_categories"))
-
-@app.route("/admin/standoff_configs/add", methods=["POST"])
-@login_required
-def add_standoff_config():
-    name = (request.form.get("name") or "").strip()
-    sort_order = int(request.form.get("sort_order") or 0)
-    if len(name) < 2:
-        return _flash_back("Nome configurazione troppo corto.", "danger", "admin_categories")
-    if StandoffConfigOption.query.filter_by(name=name).first():
-        return _flash_back("Configurazione già esistente.", "danger", "admin_categories")
-
-    db.session.add(StandoffConfigOption(name=name, sort_order=sort_order))
-    db.session.commit()
-    flash("Configurazione aggiunta.", "success")
-    return redirect(url_for("admin_categories"))
-
-
-@app.route("/admin/standoff_configs/<int:opt_id>/update", methods=["POST"])
-@login_required
-def update_standoff_config(opt_id):
-    opt = StandoffConfigOption.query.get_or_404(opt_id)
-    name = (request.form.get("name") or "").strip()
-    sort_order = int(request.form.get("sort_order") or opt.sort_order)
-    if len(name) < 2:
-        return _flash_back("Nome configurazione troppo corto.", "danger", "admin_categories")
-    if StandoffConfigOption.query.filter(StandoffConfigOption.id != opt.id, StandoffConfigOption.name == name).first():
-        return _flash_back("Esiste già una configurazione con questo nome.", "danger", "admin_categories")
-
-    previous_name = opt.name
-    opt.name = name
-    opt.sort_order = sort_order
-    if name != previous_name:
-        Item.query.filter_by(standoff_config=previous_name).update({"standoff_config": name})
-    db.session.commit()
-    flash("Configurazione aggiornata.", "success")
-    return redirect(url_for("admin_categories"))
-
-
-@app.route("/admin/standoff_configs/<int:opt_id>/delete", methods=["POST"])
-@login_required
-def delete_standoff_config(opt_id):
-    opt = StandoffConfigOption.query.get_or_404(opt_id)
-    used = Item.query.filter_by(standoff_config=opt.name).first()
-    if used:
-        flash("Impossibile eliminare: ci sono articoli che usano questa configurazione.", "danger")
-    else:
-        db.session.delete(opt)
-        db.session.commit()
-        flash("Configurazione eliminata.", "success")
     return redirect(url_for("admin_categories"))
 
 # ===================== ADMIN: CONFIGURAZIONE =====================
@@ -2161,8 +2098,6 @@ def labels_pdf():
 
         # Torrette
         elif is_standoff(item):
-            if item.standoff_config:
-                parts.append(item.standoff_config)
             v = _fmt_mm(item.length_mm)
             if v:
                 parts.append(f"L{v}")
@@ -2350,7 +2285,6 @@ def lite_migrations():
     if "length_mm" not in cols:           alters.append("ALTER TABLE item ADD COLUMN length_mm FLOAT")
     if "outer_d_mm" not in cols:          alters.append("ALTER TABLE item ADD COLUMN outer_d_mm FLOAT")
     if "label_show_thread" not in cols:   alters.append("ALTER TABLE item ADD COLUMN label_show_thread BOOLEAN NOT NULL DEFAULT 1")
-    if "standoff_config" not in cols:     alters.append("ALTER TABLE item ADD COLUMN standoff_config TEXT")
     # settings table
     cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='settings'")
     if not cur.fetchone():
@@ -2387,15 +2321,6 @@ def lite_migrations():
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(standard_id, value),
                 FOREIGN KEY(standard_id) REFERENCES thread_standard(id)
-            )
-        """)
-    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='standoff_config_option'")
-    if not cur.fetchone():
-        cur.execute("""
-            CREATE TABLE standoff_config_option (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE,
-                sort_order INTEGER NOT NULL DEFAULT 0
             )
         """)
     cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='custom_field'")
@@ -2559,10 +2484,63 @@ def migrate_drive_to_subtype():
             db.session.flush()
         item = Item.query.get(data["id"])
         if item:
-            item.subtype_id = subtype.id
+            item.subtype = subtype
             item.name = auto_name_for(item)
         db.session.execute(
             text("UPDATE item SET drive = NULL WHERE id = :item_id"),
+            {"item_id": data["id"]},
+        )
+    db.session.commit()
+
+def migrate_standoff_config_to_subtype():
+    try:
+        cols = {
+            row[1]
+            for row in db.session.execute(text("PRAGMA table_info(item)")).fetchall()
+        }
+    except Exception:
+        return
+    if "standoff_config" not in cols:
+        return
+    rows = db.session.execute(
+        text("""
+            SELECT id, category_id, subtype_id, standoff_config
+            FROM item
+            WHERE standoff_config IS NOT NULL
+              AND trim(standoff_config) != ''
+        """)
+    ).fetchall()
+    if not rows:
+        return
+    for row in rows:
+        data = row._mapping
+        config_value = (data["standoff_config"] or "").strip()
+        if not config_value:
+            continue
+        base_name = ""
+        if data["subtype_id"]:
+            subtype = Subtype.query.get(data["subtype_id"])
+            base_name = subtype.name if subtype else ""
+        if base_name:
+            subtype_name = f"{base_name} {config_value}".strip()
+        else:
+            subtype_name = config_value
+        if not subtype_name:
+            continue
+        subtype = Subtype.query.filter_by(
+            category_id=data["category_id"],
+            name=subtype_name,
+        ).first()
+        if not subtype:
+            subtype = Subtype(category_id=data["category_id"], name=subtype_name)
+            db.session.add(subtype)
+            db.session.flush()
+        item = Item.query.get(data["id"])
+        if item:
+            item.subtype_id = subtype.id
+            item.name = auto_name_for(item)
+        db.session.execute(
+            text("UPDATE item SET standoff_config = NULL WHERE id = :item_id"),
             {"item_id": data["id"]},
         )
     db.session.commit()
@@ -2617,12 +2595,6 @@ def seed_if_empty_or_missing():
             exists = ThreadSize.query.filter_by(standard_id=standard.id, value=value).first()
             if not exists:
                 db.session.add(ThreadSize(standard_id=standard.id, value=value, sort_order=idx * 10))
-
-    standoff_defaults = ["M/F", "F/F", "M/M", "Passante"]
-    for idx, name in enumerate(standoff_defaults, start=1):
-        if not StandoffConfigOption.query.filter_by(name=name).first():
-            db.session.add(StandoffConfigOption(name=name, sort_order=idx * 10))
-    db.session.commit()
 
     cat = {c.name: c.id for c in Category.query.all()}
 
@@ -2696,6 +2668,7 @@ def init_db():
         lite_migrations()
         seed_if_empty_or_missing()
         migrate_drive_to_subtype()
+        migrate_standoff_config_to_subtype()
 
 # ===================== MAIN =====================
 if __name__ == "__main__":
