@@ -154,13 +154,30 @@
       <option value="out" {{ 'selected' if request.args.get('stock') == 'out' else '' }}>Esauriti</option>
     </select>
   </div>
+  <div class="col-md-3">
+    <label class="form-label small text-muted mb-1">Cassettiera</label>
+    <select name="pos_cabinet_id" class="form-select">
+      <option value="">Tutte</option>
+      {% for c in cabinets %}
+        <option value="{{ c.id }}" {{ 'selected' if (request.args.get('pos_cabinet_id')|int)==c.id else '' }}>{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <label class="form-label small text-muted mb-1">Colonna</label>
+    <input type="text" name="pos_col" class="form-control" placeholder="A..ZZ" value="{{ request.args.get('pos_col','') }}">
+  </div>
+  <div class="col-md-2">
+    <label class="form-label small text-muted mb-1">Riga</label>
+    <input type="number" min="1" max="128" name="pos_row" class="form-control" placeholder="1..128" value="{{ request.args.get('pos_row','') }}">
+  </div>
   <div class="col-md-12 d-flex flex-wrap gap-2 mt-1">
     <button class="btn btn-primary btn-sm">Filtra</button>
     <a href="{{ url_for('index') }}" class="btn btn-secondary btn-sm">Reset</a>
     <div class="d-flex flex-wrap gap-1">
-      <a class="btn btn-outline-dark btn-sm {{ 'active' if request.args.get('stock') == 'available' else '' }}" href="{{ url_for('index', stock='available', q=request.args.get('q'), category_id=request.args.get('category_id'), material_id=request.args.get('material_id'), measure=request.args.get('measure')) }}">Disponibili</a>
-      <a class="btn btn-outline-warning btn-sm {{ 'active' if request.args.get('stock') == 'low' else '' }}" href="{{ url_for('index', stock='low', q=request.args.get('q'), category_id=request.args.get('category_id'), material_id=request.args.get('material_id'), measure=request.args.get('measure')) }}">Scorte basse</a>
-      <a class="btn btn-outline-danger btn-sm {{ 'active' if request.args.get('stock') == 'out' else '' }}" href="{{ url_for('index', stock='out', q=request.args.get('q'), category_id=request.args.get('category_id'), material_id=request.args.get('material_id'), measure=request.args.get('measure')) }}">Esauriti</a>
+      <a class="btn btn-outline-dark btn-sm {{ 'active' if request.args.get('stock') == 'available' else '' }}" href="{{ url_for('index', stock='available', q=request.args.get('q'), category_id=request.args.get('category_id'), material_id=request.args.get('material_id'), measure=request.args.get('measure'), pos_cabinet_id=request.args.get('pos_cabinet_id'), pos_col=request.args.get('pos_col'), pos_row=request.args.get('pos_row')) }}">Disponibili</a>
+      <a class="btn btn-outline-warning btn-sm {{ 'active' if request.args.get('stock') == 'low' else '' }}" href="{{ url_for('index', stock='low', q=request.args.get('q'), category_id=request.args.get('category_id'), material_id=request.args.get('material_id'), measure=request.args.get('measure'), pos_cabinet_id=request.args.get('pos_cabinet_id'), pos_col=request.args.get('pos_col'), pos_row=request.args.get('pos_row')) }}">Scorte basse</a>
+      <a class="btn btn-outline-danger btn-sm {{ 'active' if request.args.get('stock') == 'out' else '' }}" href="{{ url_for('index', stock='out', q=request.args.get('q'), category_id=request.args.get('category_id'), material_id=request.args.get('material_id'), measure=request.args.get('measure'), pos_cabinet_id=request.args.get('pos_cabinet_id'), pos_col=request.args.get('pos_col'), pos_row=request.args.get('pos_row')) }}">Esauriti</a>
     </div>
   </div>
 </form>
