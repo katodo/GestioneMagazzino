@@ -3,9 +3,10 @@ from flask import Flask, render_template, redirect, url_for, request, jsonify, f
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from sqlalchemy import func, select, or_, text
+from sqlalchemy.orm import selectinload
 from datetime import datetime, timezone
 import json
-import os, io
+import os, io, csv
 
 # ===================== DEFAULT ETICHETTE =====================
 DEFAULT_LABEL_W_MM = 50
@@ -86,27 +87,34 @@ class Category(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), unique=True, nullable=False)
     color = db.Column(db.String(7), nullable=False, default="#000000")  # HEX
+    __table_args__ = (db.Index("ix_category_name", "name"),)
 
 class Material(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), unique=True, nullable=False)
+    __table_args__ = (db.Index("ix_material_name", "name"),)
 
 class Finish(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), unique=True, nullable=False)
+    __table_args__ = (db.Index("ix_finish_name", "name"),)
 
 class ThreadStandard(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     code = db.Column(db.String(8), unique=True, nullable=False)
     label = db.Column(db.String(50), nullable=False)
     sort_order = db.Column(db.Integer, nullable=False, default=0)
+    __table_args__ = (db.Index("ix_thread_standard_code", "code"),)
 
 class ThreadSize(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     standard_id = db.Column(db.Integer, db.ForeignKey("thread_standard.id"), nullable=False)
     value = db.Column(db.String(32), nullable=False)
     sort_order = db.Column(db.Integer, nullable=False, default=0)
-    __table_args__ = (db.UniqueConstraint('standard_id', 'value', name='uq_size_per_standard'),)
+    __table_args__ = (
+        db.UniqueConstraint('standard_id', 'value', name='uq_size_per_standard'),
+        db.Index("ix_thread_size_standard_value", "standard_id", "value"),
+    )
     standard = db.relationship("ThreadStandard")
 
 class CustomField(db.Model):
@@ -123,24 +131,34 @@ class CategoryFieldSetting(db.Model):
     category_id = db.Column(db.Integer, db.ForeignKey("category.id"), nullable=False)
     field_key = db.Column(db.String(64), nullable=False)
     is_enabled = db.Column(db.Boolean, nullable=False, default=True)
-    __table_args__ = (db.UniqueConstraint('category_id', 'field_key', name='uq_field_per_category'),)
+    __table_args__ = (
+        db.UniqueConstraint('category_id', 'field_key', name='uq_field_per_category'),
+        db.Index("ix_category_field_setting_category", "category_id"),
+    )
 
 class ItemCustomFieldValue(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
     field_id = db.Column(db.Integer, db.ForeignKey("custom_field.id"), nullable=False)
     value_text = db.Column(db.String(255), nullable=True)
-    __table_args__ = (db.UniqueConstraint('item_id', 'field_id', name='uq_custom_field_value'),)
+    __table_args__ = (
+        db.UniqueConstraint('item_id', 'field_id', name='uq_custom_field_value'),
+        db.Index("ix_item_custom_field_value_item", "item_id"),
+    )
 
 class Subtype(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     category_id = db.Column(db.Integer, db.ForeignKey("category.id"), nullable=False)
     name = db.Column(db.String(80), nullable=False)
-    __table_args__ = (db.UniqueConstraint('category_id', 'name', name='uq_subtype_per_category'),)
+    __table_args__ = (
+        db.UniqueConstraint('category_id', 'name', name='uq_subtype_per_category'),
+        db.Index("ix_subtype_category", "category_id"),
+    )
 
 class Location(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(80), unique=True, nullable=False)  # solo nome
+    __table_args__ = (db.Index("ix_location_name", "name"),)
 
 class Cabinet(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -149,6 +167,7 @@ class Cabinet(db.Model):
     rows_max = db.Column(db.Integer, nullable=False, default=128)
     cols_max = db.Column(db.String(2), nullable=False, default="ZZ")  # A..Z, AA..ZZ
     compartments_per_slot = db.Column(db.Integer, nullable=False, default=6)
+    __table_args__ = (db.Index("ix_cabinet_location", "location_id"),)
 
 class Slot(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -156,7 +175,10 @@ class Slot(db.Model):
     row_num = db.Column(db.Integer, nullable=False)         # 1..128
     col_code = db.Column(db.String(2), nullable=False)      # A..Z, AA..ZZ
     is_blocked = db.Column(db.Boolean, nullable=False, default=False)
-    __table_args__ = (db.UniqueConstraint('cabinet_id', 'row_num', 'col_code', name='uq_slot_in_cabinet'),)
+    __table_args__ = (
+        db.UniqueConstraint('cabinet_id', 'row_num', 'col_code', name='uq_slot_in_cabinet'),
+        db.Index("ix_slot_cabinet_row_col", "cabinet_id", "row_num", "col_code"),
+    )
 
 class DrawerMerge(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -165,6 +187,7 @@ class DrawerMerge(db.Model):
     row_end = db.Column(db.Integer, nullable=False)
     col_start = db.Column(db.String(2), nullable=False)
     col_end = db.Column(db.String(2), nullable=False)
+    __table_args__ = (db.Index("ix_drawer_merge_cabinet", "cabinet_id"),)
 
 class Item(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -195,12 +218,23 @@ class Item(db.Model):
     subtype  = db.relationship("Subtype")
     material = db.relationship("Material")
     finish   = db.relationship("Finish")
+    __table_args__ = (
+        db.Index("ix_item_category", "category_id"),
+        db.Index("ix_item_subtype", "subtype_id"),
+        db.Index("ix_item_material", "material_id"),
+        db.Index("ix_item_finish", "finish_id"),
+        db.Index("ix_item_thread_size", "thread_size"),
+    )
 
 class Assignment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     slot_id = db.Column(db.Integer, db.ForeignKey("slot.id"), nullable=False)
     compartment_no = db.Column(db.Integer, nullable=False, default=1)
     item_id = db.Column(db.Integer, db.ForeignKey("item.id"), nullable=False)
+    __table_args__ = (
+        db.Index("ix_assignment_item", "item_id"),
+        db.Index("ix_assignment_slot", "slot_id"),
+    )
     __table_args__ = (db.UniqueConstraint('slot_id', 'compartment_no', name='uq_compartment_in_slot'),)
 
 # ===================== HELPERS =====================
@@ -607,7 +641,12 @@ def logout():
 @app.route("/")
 def index():
     low_stock_threshold = 5
-    q = Item.query
+    q = Item.query.options(
+        selectinload(Item.category),
+        selectinload(Item.material),
+        selectinload(Item.finish),
+        selectinload(Item.subtype),
+    )
     if request.args.get("category_id"): q = q.filter(Item.category_id == request.args.get("category_id"))
     if request.args.get("material_id"): q = q.filter(Item.material_id == request.args.get("material_id"))
     if request.args.get("measure"):      q = q.filter(func.lower(Item.thread_size).contains(request.args.get("measure").lower()))
@@ -618,6 +657,18 @@ def index():
             func.lower(Item.description).contains(term),
             func.lower(Item.thread_size).contains(term),
         ))
+    pos_cabinet_id = request.args.get("pos_cabinet_id", type=int)
+    pos_col = (request.args.get("pos_col") or "").strip().upper()
+    pos_row = request.args.get("pos_row", type=int)
+    if pos_cabinet_id or pos_col or pos_row:
+        pos_q = db.session.query(Assignment.item_id).join(Slot, Assignment.slot_id == Slot.id)
+        if pos_cabinet_id:
+            pos_q = pos_q.filter(Slot.cabinet_id == pos_cabinet_id)
+        if pos_col:
+            pos_q = pos_q.filter(Slot.col_code == pos_col)
+        if pos_row:
+            pos_q = pos_q.filter(Slot.row_num == pos_row)
+        q = q.filter(Item.id.in_(pos_q))
     stock = request.args.get("stock")
     if stock == "available":
         q = q.filter(Item.quantity > 0)
@@ -697,16 +748,20 @@ def build_full_grid(cabinet_id:int):
                 if key != anchor_key:
                     merge_skips[key] = True
 
-    slot_rows = (db.session.query(Slot)
-                 .filter(Slot.cabinet_id==cabinet_id)
-                 .all())
+    slot_rows = (
+        db.session.query(Slot)
+        .filter(Slot.cabinet_id == cabinet_id)
+        .all()
+    )
 
-    assigns = (db.session.query(Assignment, Slot)
-               .join(Slot, Assignment.slot_id==Slot.id)
-               .filter(Slot.cabinet_id==cabinet_id).all())
-    items_by_slot = {}
-    for a, s in assigns:
-        items_by_slot.setdefault((s.col_code, s.row_num), []).append(a.item_id)
+    assigns = (
+        db.session.query(Assignment, Slot, Item, Category)
+        .join(Slot, Assignment.slot_id == Slot.id)
+        .join(Item, Assignment.item_id == Item.id)
+        .join(Category, Item.category_id == Category.id, isouter=True)
+        .filter(Slot.cabinet_id == cabinet_id)
+        .all()
+    )
 
     cells = {}
     for s in slot_rows:
@@ -714,17 +769,14 @@ def build_full_grid(cabinet_id:int):
             key = f"{s.col_code}-{s.row_num}"
             cells[key] = {"blocked": True, "entries": [], "cat_id": None}
 
-    for (col, row), item_ids in items_by_slot.items():
-        key = f"{col}-{row}"
+    for a, s, it, cat in assigns:
+        key = f"{s.col_code}-{s.row_num}"
         cell = cells.get(key, {"blocked": False, "entries": [], "cat_id": None})
-        for iid in item_ids:
-            it = db.session.get(Item, iid)
-            if not it: continue
-            text = short_cell_text(it)
-            color = it.category.color if it.category else "#999"
-            cell["entries"].append({"text": text, "color": color})
-            if cell["cat_id"] is None and it.category_id:
-                cell["cat_id"] = it.category_id
+        text = short_cell_text(it)
+        color = cat.color if cat else "#999"
+        cell["entries"].append({"text": text, "color": color})
+        if cell["cat_id"] is None and it.category_id:
+            cell["cat_id"] = it.category_id
         cells[key] = cell
 
     for anchor_key, region in merge_regions.items():
@@ -841,11 +893,77 @@ def api_item(item_id):
         "position": full_pos
     })
 
+@app.route("/api/slots/lookup")
+def api_slot_lookup():
+    cab_id = request.args.get("cabinet_id", type=int)
+    col_code = (request.args.get("col_code") or "").strip().upper()
+    row_num = request.args.get("row_num", type=int)
+    if not (cab_id and col_code and row_num):
+        return jsonify({"ok": False, "error": "Parametri mancanti."}), 400
+
+    region = merge_region_for(cab_id, col_code, row_num)
+    if region:
+        col_code = region["anchor_col"]
+        row_num = region["anchor_row"]
+        cells = merge_cells_from_region(region)
+    else:
+        cells = [(col_code, row_num)]
+
+    slots = (
+        Slot.query.filter(Slot.cabinet_id == cab_id)
+        .filter(or_(*[
+            (Slot.col_code == col) & (Slot.row_num == row)
+            for col, row in cells
+        ]))
+        .all()
+    )
+    if not slots:
+        return jsonify({"ok": True, "items": []})
+
+    slot_ids = [s.id for s in slots]
+    assigns = (
+        db.session.query(Assignment, Item, Category, Slot)
+        .join(Item, Assignment.item_id == Item.id)
+        .join(Category, Item.category_id == Category.id, isouter=True)
+        .join(Slot, Assignment.slot_id == Slot.id)
+        .filter(Assignment.slot_id.in_(slot_ids))
+        .order_by(Slot.col_code, Slot.row_num, Assignment.compartment_no)
+        .all()
+    )
+    items = []
+    for a, it, cat, slot in assigns:
+        items.append({
+            "id": it.id,
+            "name": auto_name_for(it),
+            "category": cat.name if cat else None,
+            "color": cat.color if cat else "#999999",
+            "position": f"{slot.col_code}{slot.row_num}",
+        })
+    return jsonify({"ok": True, "items": items})
+
 # ===================== ADMIN: ARTICOLI =====================
 @app.route("/admin")
 @login_required
 def admin_items():
-    items      = Item.query.all()
+    items_q    = Item.query.options(
+        selectinload(Item.category),
+        selectinload(Item.material),
+        selectinload(Item.finish),
+        selectinload(Item.subtype),
+    )
+    pos_cabinet_id = request.args.get("pos_cabinet_id", type=int)
+    pos_col = (request.args.get("pos_col") or "").strip().upper()
+    pos_row = request.args.get("pos_row", type=int)
+    if pos_cabinet_id or pos_col or pos_row:
+        pos_q = db.session.query(Assignment.item_id).join(Slot, Assignment.slot_id == Slot.id)
+        if pos_cabinet_id:
+            pos_q = pos_q.filter(Slot.cabinet_id == pos_cabinet_id)
+        if pos_col:
+            pos_q = pos_q.filter(Slot.col_code == pos_col)
+        if pos_row:
+            pos_q = pos_q.filter(Slot.row_num == pos_row)
+        items_q = items_q.filter(Item.id.in_(pos_q))
+    items = items_q.all()
     categories = Category.query.order_by(Category.name).all()
     subtypes   = Subtype.query.order_by(Subtype.name).all()
     materials  = Material.query.order_by(Material.name).all()
@@ -898,6 +1016,63 @@ def admin_items():
         total_categories=total_categories,
         low_stock_threshold=low_stock_threshold
     )
+
+@app.route("/admin/items/export")
+@login_required
+def export_items_csv():
+    items = Item.query.options(
+        selectinload(Item.category),
+        selectinload(Item.subtype),
+        selectinload(Item.material),
+        selectinload(Item.finish),
+    ).order_by(Item.id).all()
+
+    assignments = (
+        db.session.query(Assignment.item_id, Cabinet.name, Slot.col_code, Slot.row_num)
+        .join(Slot, Assignment.slot_id == Slot.id)
+        .join(Cabinet, Slot.cabinet_id == Cabinet.id)
+        .all()
+    )
+    pos_by_item = {a.item_id: make_full_position(a.name, a.col_code, a.row_num) for a in assignments}
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "id",
+        "name",
+        "category",
+        "subtype",
+        "thread_standard",
+        "thread_size",
+        "length_mm",
+        "outer_d_mm",
+        "inner_d_mm",
+        "thickness_mm",
+        "material",
+        "finish",
+        "description",
+        "position",
+    ])
+    for item in items:
+        writer.writerow([
+            item.id,
+            auto_name_for(item),
+            item.category.name if item.category else "",
+            item.subtype.name if item.subtype else "",
+            item.thread_standard or "",
+            item.thread_size or "",
+            item.length_mm if item.length_mm is not None else "",
+            item.outer_d_mm if item.outer_d_mm is not None else "",
+            item.inner_d_mm if item.inner_d_mm is not None else "",
+            item.thickness_mm if item.thickness_mm is not None else "",
+            item.material.name if item.material else "",
+            item.finish.name if item.finish else "",
+            item.description or "",
+            pos_by_item.get(item.id, ""),
+        ])
+    output.seek(0)
+    buffer = io.BytesIO(output.getvalue().encode("utf-8"))
+    return send_file(buffer, as_attachment=True, download_name="articoli.csv", mimetype="text/csv")
 
 
 @app.route("/admin/to_place")
@@ -1047,17 +1222,26 @@ def _assign_position(item, cabinet_id:int, col_code:str, row_num:int):
     db.session.add(Assignment(slot_id=slot.id, compartment_no=comp_no, item_id=item.id))
 
 def _suggest_position(item: Item):
-    rows = (db.session.query(Slot, Cabinet)
-            .join(Cabinet, Slot.cabinet_id==Cabinet.id)
-            .order_by(Cabinet.name, Slot.col_code, Slot.row_num)
-            .all())
-    for slot, cab in rows:
-        if slot.is_blocked: continue
-        assigns = Assignment.query.filter_by(slot_id=slot.id).all()
-        if not assigns:    continue
-        cats = {db.session.get(Item, a.item_id).category_id for a in assigns}
-        if cats == {item.category_id}:
-            if len(assigns) < (cab.compartments_per_slot or 6):
+    rows = (
+        db.session.query(
+            Slot,
+            Cabinet,
+            func.count(Assignment.id).label("assign_count"),
+            func.min(Item.category_id).label("min_cat"),
+            func.max(Item.category_id).label("max_cat"),
+        )
+        .join(Cabinet, Slot.cabinet_id == Cabinet.id)
+        .outerjoin(Assignment, Assignment.slot_id == Slot.id)
+        .outerjoin(Item, Assignment.item_id == Item.id)
+        .group_by(Slot.id, Cabinet.id)
+        .order_by(Cabinet.name, Slot.col_code, Slot.row_num)
+        .all()
+    )
+    for slot, cab, assign_count, min_cat, max_cat in rows:
+        if slot.is_blocked or assign_count == 0:
+            continue
+        if min_cat == max_cat == item.category_id:
+            if assign_count < (cab.compartments_per_slot or 6):
                 return cab.id, slot.col_code, slot.row_num
     return None
 
@@ -1642,8 +1826,14 @@ def _ensure_slot(cab_id:int, col_code:str, row_num:int) -> Slot:
     return s
 
 def _slot_categories(slot_id:int) -> set:
-    items = [db.session.get(Item, a.item_id) for a in Assignment.query.filter_by(slot_id=slot_id).all()]
-    return {it.category_id for it in items if it}
+    rows = (
+        db.session.query(Item.category_id)
+        .join(Assignment, Assignment.item_id == Item.id)
+        .filter(Assignment.slot_id == slot_id)
+        .distinct()
+        .all()
+    )
+    return {cat_id for (cat_id,) in rows if cat_id}
 
 def _slot_capacity_ok(cabinet:Cabinet, assigns_count:int) -> bool:
     return assigns_count <= (cabinet.compartments_per_slot or 6)
