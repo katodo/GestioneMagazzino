@@ -1218,6 +1218,9 @@ def edit_item(item_id):
            .join(Cabinet, Slot.cabinet_id == Cabinet.id)
            .filter(Assignment.item_id == item.id).first())
     current_position = make_full_position(pos[2].name, pos[1].col_code, pos[1].row_num) if pos else None
+    current_cabinet_id = pos[2].id if pos else None
+    current_col_code = pos[1].col_code if pos else ""
+    current_row_num = pos[1].row_num if pos else ""
 
     custom_fields = CustomField.query.filter_by(is_active=True).order_by(CustomField.sort_order, CustomField.name).all()
     serialized_custom_fields = serialize_custom_fields(custom_fields)
@@ -1233,7 +1236,10 @@ def edit_item(item_id):
         thread_standards=thread_standards, sizes_by_standard=sizes_by_standard,
         custom_fields=serialized_custom_fields,
         custom_field_values=custom_field_values,
-        category_fields=category_fields
+        category_fields=category_fields,
+        current_cabinet_id=current_cabinet_id,
+        current_col_code=current_col_code,
+        current_row_num=current_row_num
     )
 
 @app.route("/admin/items/<int:item_id>/delete", methods=["POST"])

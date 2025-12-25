@@ -139,16 +139,16 @@
       <label class="form-label">Cassettiera</label>
       <select class="form-select" id="cabinet_id" name="cabinet_id">
         <option value="">(scegli)</option>
-        {% for c in cabinets %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+        {% for c in cabinets %}<option value="{{ c.id }}" {{ 'selected' if current_cabinet_id==c.id else '' }}>{{ c.name }}</option>{% endfor %}
       </select>
     </div>
     <div class="col-md-2">
       <label class="form-label">Colonna</label>
-      <input class="form-control" id="col_code" name="col_code" placeholder="es. D">
+      <input class="form-control" id="col_code" name="col_code" placeholder="es. D" value="{{ current_col_code }}">
     </div>
     <div class="col-md-2">
       <label class="form-label">Riga</label>
-      <input type="number" min="1" max="128" class="form-control" id="row_num" name="row_num">
+      <input type="number" min="1" max="128" class="form-control" id="row_num" name="row_num" value="{{ current_row_num }}">
     </div>
     <div class="col-md-2 d-flex align-items-end">
       <button formaction="{{ url_for('set_position', item_id=item.id) }}" formmethod="post" class="btn btn-outline-primary w-100">Imposta</button>
