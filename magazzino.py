@@ -1217,7 +1217,6 @@ def edit_item(item_id):
            .join(Slot, Assignment.slot_id == Slot.id)
            .join(Cabinet, Slot.cabinet_id == Cabinet.id)
            .filter(Assignment.item_id == item.id).first())
-    current_position = make_full_position(pos[2].name, pos[1].col_code, pos[1].row_num) if pos else None
     current_cabinet_id = pos[2].id if pos else None
     current_col_code = pos[1].col_code if pos else ""
     current_row_num = pos[1].row_num if pos else ""
