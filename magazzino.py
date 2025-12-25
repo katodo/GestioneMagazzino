@@ -385,7 +385,8 @@ def ensure_settings_columns():
     for col_name, col_type, default_val in new_cols:
         if col_name not in existing_cols:
             try:
-                db.session.execute(text(f"ALTER TABLE settings ADD COLUMN {col_name} {col_type} DEFAULT :default_val"), {"default_val": default_val})
+                default_sql = f" DEFAULT {default_val}" if default_val is not None else ""
+                db.session.execute(text(f"ALTER TABLE settings ADD COLUMN {col_name} {col_type}{default_sql}"))
                 added = True
             except Exception:
                 db.session.rollback()
@@ -2759,6 +2760,7 @@ def labels_pdf():
 # ===================== INIT / SEED =====================
 
 def seed_if_empty_or_missing():
+    ensure_settings_columns()
     if not User.query.filter_by(username="admin").first():
         db.session.add(User(username="admin", password="admin"))
     if not Settings.query.get(1):
