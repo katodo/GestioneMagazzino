@@ -220,6 +220,7 @@ class Item(db.Model):
     # flag etichetta
     label_show_category = db.Column(db.Boolean, nullable=False, default=True)
     label_show_subtype  = db.Column(db.Boolean, nullable=False, default=True)
+    label_show_thread   = db.Column(db.Boolean, nullable=False, default=True)
     label_show_measure  = db.Column(db.Boolean, nullable=False, default=True)
     label_show_main     = db.Column(db.Boolean, nullable=False, default=True)
     label_show_material = db.Column(db.Boolean, nullable=False, default=True)
@@ -1154,6 +1155,7 @@ def add_item():
         quantity=int(f.get("quantity")) if f.get("quantity") else 0,
         label_show_category=bool(f.get("label_show_category")),
         label_show_subtype =bool(f.get("label_show_subtype")),
+        label_show_thread  =bool(f.get("label_show_thread")),
         label_show_measure =bool(f.get("label_show_measure")),
         label_show_main    =bool(f.get("label_show_main")),
         label_show_material=bool(f.get("label_show_material")),
@@ -1189,6 +1191,7 @@ def edit_item(item_id):
         item.quantity = int(f.get("quantity")) if f.get("quantity") else 0
         item.label_show_category = bool(f.get("label_show_category"))
         item.label_show_subtype  = bool(f.get("label_show_subtype"))
+        item.label_show_thread   = bool(f.get("label_show_thread"))
         item.label_show_measure  = bool(f.get("label_show_measure"))
         item.label_show_main     = bool(f.get("label_show_main"))
         item.label_show_material = bool(f.get("label_show_material"))
