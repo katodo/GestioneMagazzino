@@ -14,6 +14,11 @@ DEFAULT_LABEL_H_MM = 10
 DEFAULT_MARG_TB_MM = 15
 DEFAULT_MARG_LR_MM = 10
 DEFAULT_GAP_MM     = 1
+DEFAULT_LABEL_PADDING_MM = 1.5
+DEFAULT_LABEL_QR_SIZE_MM = 9
+DEFAULT_LABEL_QR_MARGIN_MM = 1
+DEFAULT_LABEL_POSITION_WIDTH_MM = 12
+DEFAULT_LABEL_POSITION_FONT_PT = 7.0
 DEFAULT_ORIENTATION_LANDSCAPE = True
 DEFAULT_QR_DEFAULT = True
 DEFAULT_QR_BASE_URL = None  # es. "https://magazzino.local"
@@ -50,6 +55,11 @@ class Settings(db.Model):
     margin_tb_mm = db.Column(db.Float, nullable=False, default=DEFAULT_MARG_TB_MM)
     margin_lr_mm = db.Column(db.Float, nullable=False, default=DEFAULT_MARG_LR_MM)
     gap_mm = db.Column(db.Float, nullable=False, default=DEFAULT_GAP_MM)
+    label_padding_mm = db.Column(db.Float, nullable=False, default=DEFAULT_LABEL_PADDING_MM)
+    label_qr_size_mm = db.Column(db.Float, nullable=False, default=DEFAULT_LABEL_QR_SIZE_MM)
+    label_qr_margin_mm = db.Column(db.Float, nullable=False, default=DEFAULT_LABEL_QR_MARGIN_MM)
+    label_position_width_mm = db.Column(db.Float, nullable=False, default=DEFAULT_LABEL_POSITION_WIDTH_MM)
+    label_position_font_pt = db.Column(db.Float, nullable=False, default=DEFAULT_LABEL_POSITION_FONT_PT)
     orientation_landscape = db.Column(db.Boolean, nullable=False, default=DEFAULT_ORIENTATION_LANDSCAPE)
     qr_default = db.Column(db.Boolean, nullable=False, default=DEFAULT_QR_DEFAULT)
     qr_base_url = db.Column(db.String(200), nullable=True)
@@ -357,7 +367,34 @@ def auto_name_for(item:Item)->str:
     if item.material: parts.append(item.material.name)
     return " ".join(parts)[:118]
 
+def ensure_settings_columns():
+    """Aggiunge le nuove colonne delle impostazioni se mancano nel DB SQLite."""
+    try:
+        rows = db.session.execute(text("PRAGMA table_info(settings)")).fetchall()
+    except Exception:
+        return
+    existing_cols = {r[1] for r in rows}
+    new_cols = [
+        ("label_padding_mm", "REAL", DEFAULT_LABEL_PADDING_MM),
+        ("label_qr_size_mm", "REAL", DEFAULT_LABEL_QR_SIZE_MM),
+        ("label_qr_margin_mm", "REAL", DEFAULT_LABEL_QR_MARGIN_MM),
+        ("label_position_width_mm", "REAL", DEFAULT_LABEL_POSITION_WIDTH_MM),
+        ("label_position_font_pt", "REAL", DEFAULT_LABEL_POSITION_FONT_PT),
+    ]
+    added = False
+    for col_name, col_type, default_val in new_cols:
+        if col_name not in existing_cols:
+            try:
+                db.session.execute(text(f"ALTER TABLE settings ADD COLUMN {col_name} {col_type} DEFAULT :default_val"), {"default_val": default_val})
+                added = True
+            except Exception:
+                db.session.rollback()
+                return
+    if added:
+        db.session.commit()
+
 def get_settings()->Settings:
+    ensure_settings_columns()
     s = Settings.query.get(1)
     if not s:
         s = Settings(id=1,
@@ -366,10 +403,23 @@ def get_settings()->Settings:
                      margin_tb_mm=DEFAULT_MARG_TB_MM,
                      margin_lr_mm=DEFAULT_MARG_LR_MM,
                      gap_mm=DEFAULT_GAP_MM,
+                     label_padding_mm=DEFAULT_LABEL_PADDING_MM,
+                     label_qr_size_mm=DEFAULT_LABEL_QR_SIZE_MM,
+                     label_qr_margin_mm=DEFAULT_LABEL_QR_MARGIN_MM,
+                     label_position_width_mm=DEFAULT_LABEL_POSITION_WIDTH_MM,
+                     label_position_font_pt=DEFAULT_LABEL_POSITION_FONT_PT,
                      orientation_landscape=DEFAULT_ORIENTATION_LANDSCAPE,
                      qr_default=DEFAULT_QR_DEFAULT,
                      qr_base_url=DEFAULT_QR_BASE_URL)
         db.session.add(s); db.session.commit()
+    changed = False
+    if s.label_padding_mm is None: s.label_padding_mm = DEFAULT_LABEL_PADDING_MM; changed = True
+    if s.label_qr_size_mm is None: s.label_qr_size_mm = DEFAULT_LABEL_QR_SIZE_MM; changed = True
+    if s.label_qr_margin_mm is None: s.label_qr_margin_mm = DEFAULT_LABEL_QR_MARGIN_MM; changed = True
+    if s.label_position_width_mm is None: s.label_position_width_mm = DEFAULT_LABEL_POSITION_WIDTH_MM; changed = True
+    if s.label_position_font_pt is None: s.label_position_font_pt = DEFAULT_LABEL_POSITION_FONT_PT; changed = True
+    if changed:
+        db.session.commit()
     return s
 
 def get_mqtt_settings() -> MqttSettings:
@@ -1640,6 +1690,11 @@ def update_settings():
         s.margin_tb_mm= float(request.form.get("margin_tb_mm"))
         s.margin_lr_mm= float(request.form.get("margin_lr_mm"))
         s.gap_mm      = float(request.form.get("gap_mm"))
+        s.label_padding_mm = float(request.form.get("label_padding_mm"))
+        s.label_qr_size_mm = float(request.form.get("label_qr_size_mm"))
+        s.label_qr_margin_mm = float(request.form.get("label_qr_margin_mm"))
+        s.label_position_width_mm = float(request.form.get("label_position_width_mm"))
+        s.label_position_font_pt = float(request.form.get("label_position_font_pt"))
         s.orientation_landscape = bool(request.form.get("orientation_landscape"))
         s.qr_default  = bool(request.form.get("qr_default"))
         url = request.form.get("qr_base_url","").strip()
@@ -2522,8 +2577,13 @@ def labels_pdf():
         return " ".join(parts)
 
 
-    qr_box = mm_to_pt(9) if include_qr else 0
-    qr_margin = mm_to_pt(1)
+    padding_x = mm_to_pt(getattr(s, "label_padding_mm", DEFAULT_LABEL_PADDING_MM) or DEFAULT_LABEL_PADDING_MM)
+    qr_box = mm_to_pt(getattr(s, "label_qr_size_mm", DEFAULT_LABEL_QR_SIZE_MM) or DEFAULT_LABEL_QR_SIZE_MM) if include_qr else 0
+    qr_margin = mm_to_pt(getattr(s, "label_qr_margin_mm", DEFAULT_LABEL_QR_MARGIN_MM) or DEFAULT_LABEL_QR_MARGIN_MM) if qr_box else 0
+    qr_area_width = qr_box + (qr_margin * 2 if qr_box else 0)
+    base_pos_block_w = mm_to_pt(getattr(s, "label_position_width_mm", DEFAULT_LABEL_POSITION_WIDTH_MM) or DEFAULT_LABEL_POSITION_WIDTH_MM)
+    position_font_size = getattr(s, "label_position_font_pt", DEFAULT_LABEL_POSITION_FONT_PT) or DEFAULT_LABEL_POSITION_FONT_PT
+    position_line_height = position_font_size + 0.6
 
     def _fmt_mm(v):
         if v is None:
@@ -2609,12 +2669,26 @@ def labels_pdf():
         except Exception:
             pass
 
-        # area testuale a sinistra del QR
-        text_right_limit = lab_w - (qr_box + qr_margin*2 if qr_box else 0) - mm_to_pt(1.5)
+        c.setFillColorRGB(0, 0, 0)
+
+        pos_data = pos_by_item.get(item.id)
+        pos_texts = None
+        pos_block_w = base_pos_block_w
+        if pos_data:
+            _, col_code, row_num = pos_data
+            pos_texts = (f"Rig: {int(row_num)}", f"Col: {col_code.upper()}")
+            required_w = max(pdfmetrics.stringWidth(txt, "Helvetica-Bold", position_font_size) for txt in pos_texts) + mm_to_pt(1)
+            pos_block_w = max(pos_block_w, required_w)
+
+        # area testuale a sinistra del blocco posizione/QR
+        text_right_limit = lab_w - qr_area_width - pos_block_w - padding_x
+        text_right_limit = max(text_right_limit, mm_to_pt(10))
+        text_x = x + padding_x
+
         c.setFillColorRGB(0, 0, 0)
 
         # punto di partenza dall'alto
-        cy = y + lab_h - 3.5
+        cy = y + lab_h - max(padding_x, mm_to_pt(1.0))
 
         # --- Riga 1: Categoria + Sottotipo + Misura ---
         line1_text = _line1(item)
@@ -2622,7 +2696,7 @@ def labels_pdf():
             line1_lines = wrap_to_lines(line1_text, cat_font, cat_size, text_right_limit, max_lines=1)
             if line1_lines:
                 c.setFont(cat_font, cat_size)
-                c.drawString(x + mm_to_pt(1.5), cy - cat_size, line1_lines[0])
+                c.drawString(text_x, cy - cat_size, line1_lines[0])
                 cy -= (cat_size + 0.6)
 
         # --- Riga 2: specifiche a seconda della categoria ---
@@ -2631,7 +2705,7 @@ def labels_pdf():
             line2_lines = wrap_to_lines(line2_text, title_font, title_size, text_right_limit, max_lines=1)
             if line2_lines:
                 c.setFont(title_font, title_size)
-                c.drawString(x + mm_to_pt(1.5), cy - title_size, line2_lines[0])
+                c.drawString(text_x, cy - title_size, line2_lines[0])
                 cy -= (title_size + 0.6)
 
         # Fallback: se per qualche motivo non abbiamo scritto nulla, uso il nome completo
@@ -2640,15 +2714,22 @@ def labels_pdf():
             lines = wrap_to_lines(fallback, title_font, title_size, text_right_limit, max_lines=2)
             c.setFont(title_font, title_size)
             for ln in lines:
-                c.drawString(x + mm_to_pt(1.5), cy - title_size, ln)
+                c.drawString(text_x, cy - title_size, ln)
                 cy -= (title_size + 0.6)
 
-        # posizione in basso a sinistra (Cassettiera-XY)
-        pos_data = pos_by_item.get(item.id)
-        if pos_data:
-            pos = make_full_position(pos_data[0], pos_data[1], pos_data[2])
-            c.setFont("Helvetica", 6)
-            c.drawString(x + mm_to_pt(1.5), y + 1.8, pos)
+        # posizione a sinistra del QR, su due righe
+        if pos_texts:
+            pos_x = x + lab_w - qr_area_width - pos_block_w
+            if qr_box:
+                block_height = position_line_height * len(pos_texts)
+                start_y = y + qr_margin + max((qr_box - block_height) / 2, 0) + block_height - position_font_size
+            else:
+                start_y = y + lab_h - padding_x - position_font_size
+            c.setFont("Helvetica-Bold", position_font_size)
+            line_y = start_y
+            for txt in pos_texts:
+                c.drawString(pos_x, line_y, txt)
+                line_y -= position_line_height
 
         # QR a destra
         if qr_box:
@@ -2685,7 +2766,11 @@ def seed_if_empty_or_missing():
             id=1,
             label_w_mm=DEFAULT_LABEL_W_MM, label_h_mm=DEFAULT_LABEL_H_MM,
             margin_tb_mm=DEFAULT_MARG_TB_MM, margin_lr_mm=DEFAULT_MARG_LR_MM,
-            gap_mm=DEFAULT_GAP_MM, orientation_landscape=DEFAULT_ORIENTATION_LANDSCAPE,
+            gap_mm=DEFAULT_GAP_MM, label_padding_mm=DEFAULT_LABEL_PADDING_MM,
+            label_qr_size_mm=DEFAULT_LABEL_QR_SIZE_MM, label_qr_margin_mm=DEFAULT_LABEL_QR_MARGIN_MM,
+            label_position_width_mm=DEFAULT_LABEL_POSITION_WIDTH_MM,
+            label_position_font_pt=DEFAULT_LABEL_POSITION_FONT_PT,
+            orientation_landscape=DEFAULT_ORIENTATION_LANDSCAPE,
             qr_default=DEFAULT_QR_DEFAULT, qr_base_url=DEFAULT_QR_BASE_URL
         ))
     thread_standards = [
