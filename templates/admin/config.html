@@ -3,6 +3,10 @@
 <h3>Configurazione</h3>
 <nav class="mb-3">
   <ul class="nav nav-pills flex-wrap gap-2">
+    <li class="nav-item"><a class="nav-link" href="#categorie">Categorie</a></li>
+    <li class="nav-item"><a class="nav-link" href="#sottotipi">Sottotipi</a></li>
+    <li class="nav-item"><a class="nav-link" href="#materiali">Materiali</a></li>
+    <li class="nav-item"><a class="nav-link" href="#finiture">Finiture</a></li>
     <li class="nav-item"><a class="nav-link" href="#campi-categoria">Campi per categoria</a></li>
     <li class="nav-item"><a class="nav-link" href="#stampa-etichette">Stampa etichette & QR</a></li>
     <li class="nav-item"><a class="nav-link" href="#mqtt">MQTT</a></li>
@@ -14,6 +18,197 @@
   </ul>
 </nav>
 <div class="row g-3">
+  <div class="col-12">
+    <div class="form-section" id="categorie">
+      <h5>Categorie</h5>
+      <p class="text-muted mb-2 small">Gestisci nome e colore delle categorie usate in tutto il prodotto.</p>
+      <table class="table table-sm table-striped align-middle">
+        <thead>
+          <tr><th style="width:60px;">ID</th><th>Nome</th><th style="width:70px;">Colore</th><th class="text-end" style="width:150px;">Azione</th></tr>
+        </thead>
+        <tbody>
+          {% for c in categories %}
+          <tr>
+            <td>{{ c.id }}</td>
+            <td>
+              <input class="form-control" name="name" value="{{ c.name }}" form="cat-{{ c.id }}">
+            </td>
+            <td>
+              <input type="color" class="form-control form-control-color" name="color" value="{{ c.color }}" form="cat-{{ c.id }}">
+            </td>
+            <td class="text-end">
+              <form method="post" action="{{ url_for('update_category', cat_id=c.id) }}" id="cat-{{ c.id }}" class="d-inline-block">
+                <button class="btn btn-sm btn-primary">Salva</button>
+              </form>
+              {% if c.id in used_categories %}
+                <button class="btn btn-sm btn-outline-secondary ms-1" type="button" disabled title="Categoria in uso">Elimina</button>
+              {% else %}
+                <form method="post" action="{{ url_for('delete_category', cat_id=c.id) }}" class="d-inline-block" onsubmit="return confirm('Eliminare categoria?')">
+                  <button class="btn btn-sm btn-outline-danger ms-1">Elimina</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <div class="pt-2 border-top mt-2">
+        <h6 class="mb-2">Nuova categoria</h6>
+        <form method="post" action="{{ url_for('add_category') }}" class="row g-2 align-items-center">
+          <div class="col-md-6">
+            <input class="form-control" name="name" placeholder="Nome categoria">
+          </div>
+          <div class="col-md-3">
+            <input type="color" class="form-control form-control-color" name="color" value="#607D8B">
+          </div>
+          <div class="col-md-3">
+            <button class="btn btn-primary w-100">Aggiungi</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="form-section" id="sottotipi">
+      <h5>Sottotipi (forme)</h5>
+      <form method="post" action="{{ url_for('add_subtype') }}" class="row g-2 align-items-center mb-2">
+        <div class="col-md-4">
+          <select class="form-select" name="category_id" required>
+            <option value="">Categoria...</option>
+            {% for c in categories %}
+              <option value="{{ c.id }}">{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <input class="form-control" name="name" placeholder="Nome sottotipo (es. Testa cilindrica)">
+        </div>
+        <div class="col-md-2">
+          <button class="btn btn-primary w-100">Aggiungi</button>
+        </div>
+      </form>
+
+      <table class="table table-sm table-striped align-middle">
+        <thead>
+          <tr><th style="width:60px;">ID</th><th style="width:220px;">Categoria</th><th>Nome</th><th class="text-end" style="width:150px;">Azione</th></tr>
+        </thead>
+        <tbody>
+          {% for st, c in subtypes %}
+          <tr>
+            <td>{{ st.id }}</td>
+            <td>
+              <select class="form-select" name="category_id" form="subtype-{{ st.id }}">
+                {% for cat in categories %}
+                  <option value="{{ cat.id }}" {{ 'selected' if cat.id == st.category_id else '' }}>{{ cat.name }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td>
+              <input class="form-control" name="name" value="{{ st.name }}" form="subtype-{{ st.id }}">
+            </td>
+            <td class="text-end">
+              <form method="post" action="{{ url_for('update_subtype', st_id=st.id) }}" id="subtype-{{ st.id }}" class="d-inline-block">
+                <button class="btn btn-sm btn-primary">Salva</button>
+              </form>
+              {% if st.id in used_subtypes %}
+                <button class="btn btn-sm btn-outline-secondary ms-1" type="button" disabled title="Sottotipo in uso">Elimina</button>
+              {% else %}
+                <form method="post" action="{{ url_for('delete_subtype', st_id=st.id) }}" class="d-inline-block" onsubmit="return confirm('Eliminare sottotipo?')">
+                  <button class="btn btn-sm btn-outline-danger ms-1">Elimina</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="form-section h-100" id="materiali">
+      <h5>Materiali</h5>
+      <table class="table table-sm table-striped align-middle mb-3">
+        <thead>
+          <tr><th style="width:60px;">ID</th><th>Nome</th><th class="text-end" style="width:150px;">Azione</th></tr>
+        </thead>
+        <tbody>
+          {% for m in materials %}
+          <tr>
+            <td>{{ m.id }}</td>
+            <td>
+              <input class="form-control" name="name" value="{{ m.name }}" form="material-{{ m.id }}">
+            </td>
+            <td class="text-end">
+              <form method="post" action="{{ url_for('update_material', mat_id=m.id) }}" id="material-{{ m.id }}" class="d-inline-block">
+                <button class="btn btn-sm btn-primary">Salva</button>
+              </form>
+              {% if m.id in used_materials %}
+                <button class="btn btn-sm btn-outline-secondary ms-1" type="button" disabled title="Materiale in uso">Elimina</button>
+              {% else %}
+                <form method="post" action="{{ url_for('delete_material', mat_id=m.id) }}" class="d-inline-block" onsubmit="return confirm('Eliminare materiale?')">
+                  <button class="btn btn-sm btn-outline-danger ms-1">Elimina</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <form method="post" action="{{ url_for('add_material') }}" class="row g-2">
+        <div class="col-8">
+          <input class="form-control" name="name" placeholder="Descrizione materiale">
+        </div>
+        <div class="col-4">
+          <button class="btn btn-primary w-100">Nuovo materiale</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="form-section h-100" id="finiture">
+      <h5>Finiture</h5>
+      <table class="table table-sm table-striped align-middle mb-3">
+        <thead>
+          <tr><th style="width:60px;">ID</th><th>Nome</th><th class="text-end" style="width:150px;">Azione</th></tr>
+        </thead>
+        <tbody>
+          {% for f in finishes %}
+          <tr>
+            <td>{{ f.id }}</td>
+            <td>
+              <input class="form-control" name="name" value="{{ f.name }}" form="finish-{{ f.id }}">
+            </td>
+            <td class="text-end">
+              <form method="post" action="{{ url_for('update_finish', fin_id=f.id) }}" id="finish-{{ f.id }}" class="d-inline-block">
+                <button class="btn btn-sm btn-primary">Salva</button>
+              </form>
+              {% if f.id in used_finishes %}
+                <button class="btn btn-sm btn-outline-secondary ms-1" type="button" disabled title="Finitura in uso">Elimina</button>
+              {% else %}
+                <form method="post" action="{{ url_for('delete_finish', fin_id=f.id) }}" class="d-inline-block" onsubmit="return confirm('Eliminare finitura?')">
+                  <button class="btn btn-sm btn-outline-danger ms-1">Elimina</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <form method="post" action="{{ url_for('add_finish') }}" class="row g-2">
+        <div class="col-8">
+          <input class="form-control" name="name" placeholder="Descrizione finitura">
+        </div>
+        <div class="col-4">
+          <button class="btn btn-primary w-100">Nuova finitura</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <div class="col-12">
     <div class="form-section" id="campi-categoria">
       <h5>Campi per categoria</h5>
