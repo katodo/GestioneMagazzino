@@ -417,6 +417,82 @@ def auto_name_for(item:Item)->str:
     if item.material: parts.append(item.material.name)
     return " ".join(parts)[:118]
 
+def format_mm_short(value):
+    """Restituisce un valore in mm come intero se possibile o con una singola cifra decimale."""
+    if value is None:
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if abs(v - round(v)) < 0.01:
+        return str(int(round(v)))
+    return f"{v:.1f}".rstrip("0").rstrip(".")
+
+def label_line1_text(item: Item) -> str:
+    """Testo riga 1 dell'etichetta: Categoria + Sottotipo + Misura filettatura."""
+    parts = []
+    if item.category:
+        parts.append(item.category.name)
+    if item.subtype:
+        parts.append(item.subtype.name)
+    if item.thread_size:
+        parts.append(item.thread_size)
+    return " ".join(parts)
+
+def label_line2_text(item: Item) -> str:
+    """Testo riga 2 dell'etichetta: dati tecnici a seconda della categoria."""
+    parts = []
+
+    if is_screw(item):
+        v = format_mm_short(item.length_mm)
+        if v:
+            parts.append(f"L{v}")
+        if item.material:
+            parts.append(item.material.name)
+    elif is_washer(item):
+        v_i = format_mm_short(getattr(item, "inner_d_mm", None))
+        if v_i:
+            parts.append(f"Øi{v_i}")
+        v_e = format_mm_short(item.outer_d_mm)
+        if v_e:
+            parts.append(f"Øe{v_e}")
+        v_s = format_mm_short(unified_thickness_value(item))
+        if v_s:
+            parts.append(f"sp{v_s}")
+    elif is_standoff(item):
+        v = format_mm_short(item.length_mm)
+        if v:
+            parts.append(f"L{v}")
+        if item.material:
+            parts.append(item.material.name)
+    else:
+        v = format_mm_short(item.outer_d_mm)
+        if v:
+            parts.append(f"Øe{v}")
+        v_s = format_mm_short(unified_thickness_value(item))
+        if v_s:
+            parts.append(f"sp{v_s}")
+        if item.material:
+            parts.append(item.material.name)
+
+    return " ".join(parts)
+
+def label_lines_for_item(item: Item) -> list[str]:
+    """Restituisce le righe di testo da mostrare in cella e in etichetta."""
+    lines = []
+    line1 = label_line1_text(item)
+    line2 = label_line2_text(item)
+    if line1:
+        lines.append(line1)
+    if line2:
+        lines.append(line2)
+    if not lines:
+        fallback = auto_name_for(item)
+        if fallback:
+            lines.append(fallback)
+    return lines
+
 def ensure_settings_columns():
     """Aggiunge le nuove colonne delle impostazioni se mancano nel DB SQLite."""
     try:
@@ -1022,62 +1098,8 @@ def build_full_grid(cabinet_id:int):
     }
 
 def short_cell_text(item: Item) -> str:
-    # Layout dedicato per le rondelle:
-    #   riga 1: Misura / Øi
-    #   riga 2: Øe / spessore
-    if is_washer(item):
-        line1_parts = []
-        line2_parts = []
-
-        if item.thread_size:
-            line1_parts.append(item.thread_size)
-
-        if item.inner_d_mm:
-            v = item.inner_d_mm
-            vv = int(v) if abs(v - int(v)) < 0.01 else v
-            line1_parts.append(f"Øi{vv}")
-
-        if item.outer_d_mm:
-            v = item.outer_d_mm
-            vv = int(v) if abs(v - int(v)) < 0.01 else v
-            line2_parts.append(f"Øe{vv}")
-
-        if item.length_mm:
-            v = item.length_mm
-            vv = int(v) if abs(v - int(v)) < 0.01 else v
-            line2_parts.append(f"s{vv}")
-
-        lines = []
-        if line1_parts:
-            lines.append(" ".join(str(p) for p in line1_parts))
-        if line2_parts:
-            lines.append(" ".join(str(p) for p in line2_parts))
-
-        if not lines:
-            lines.append(auto_name_for(item))
-
-        return "\n".join(lines[:2])
-
-    # Layout generico per tutte le altre categorie
-    parts = []
-    if item.thread_size:
-        parts.append(item.thread_size)
-
-    main_value = item.length_mm if (is_screw(item) or is_standoff(item) or is_spacer(item)) else item.outer_d_mm
-    if main_value:
-        v = main_value
-        vv = int(v) if abs(v - int(v)) < 0.01 else v
-        if is_standoff(item):
-            parts.append(f"L={vv}")
-        elif is_screw(item) or is_spacer(item):
-            parts.append(f"L={vv}")
-        else:
-            parts.append(f"Øe{vv}")
-
-    if not parts:
-        parts.append(auto_name_for(item))
-
-    return "\n".join(parts[:2])
+    lines = label_lines_for_item(item)
+    return "\n".join(lines[:2])
 
 def unified_thickness_value(item: Item):
     if item.thickness_mm is not None:
@@ -2861,7 +2883,7 @@ def labels_pdf():
             if is_screw(it) or is_standoff(it) or is_spacer(it):
                 return getattr(it, "length_mm", None)
             return getattr(it, "outer_d_mm", None)
-        main_values = {_fmt_mm(_main_value(it)) for it in items_list if _main_value(it) is not None}
+        main_values = {format_mm_short(_main_value(it)) for it in items_list if _main_value(it) is not None}
         if len(main_values) == 1:
             mv = next(iter(main_values))
             if mv is not None:
@@ -2909,84 +2931,6 @@ def labels_pdf():
     cat_font = "Helvetica-Bold"
     cat_size = 7.4
 
-    def _fmt_mm(value):
-        """Formatta una misura in mm come intero o con una sola cifra decimale."""
-        if value is None:
-            return None
-        try:
-            v = float(value)
-        except (TypeError, ValueError):
-            return None
-        if abs(v - round(v)) < 0.01:
-            return str(int(round(v)))
-        return f"{v:.1f}".rstrip("0").rstrip(".")
-
-    def _line1(item):
-        """
-        Riga 1: Categoria + Sottotipo + Misura (thread_size)
-        Es: 'Rondelle Piana M8'
-        """
-        parts = []
-        if item.category:
-            parts.append(item.category.name)
-        if item.subtype:
-            parts.append(item.subtype.name)
-        if item.thread_size:
-            parts.append(item.thread_size)
-        return " ".join(parts)
-
-    def _line2(item):
-        """
-        Riga 2: dati tecnici in base al tipo.
-        - Viti:      L<lunghezza>, materiale
-        - Rondelle:  Øi<interno>, Øe<esterno>, sp<spessore>
-        - Torrette:  config, L<lunghezza>, materiale
-        - Altre:     Øe<esterno>, sp<spessore>, materiale
-        """
-        parts = []
-
-        # Viti
-        if is_screw(item):
-            v = _fmt_mm(item.length_mm)
-            if v:
-                parts.append(f"L{v}")
-            if item.material:
-                parts.append(item.material.name)
-
-        # Rondelle
-        elif is_washer(item):
-            v_i = _fmt_mm(getattr(item, "inner_d_mm", None))
-            if v_i:
-                parts.append(f"Øi{v_i}")
-            v_e = _fmt_mm(item.outer_d_mm)
-            if v_e:
-                parts.append(f"Øe{v_e}")
-            v_s = _fmt_mm(unified_thickness_value(item))
-            if v_s:
-                parts.append(f"sp{v_s}")
-
-        # Torrette
-        elif is_standoff(item):
-            v = _fmt_mm(item.length_mm)
-            if v:
-                parts.append(f"L{v}")
-            if item.material:
-                parts.append(item.material.name)
-
-        # Altre tipologie
-        else:
-            v = _fmt_mm(item.outer_d_mm)
-            if v:
-                parts.append(f"Øe{v}")
-            v_s = _fmt_mm(unified_thickness_value(item))
-            if v_s:
-                parts.append(f"sp{v_s}")
-            if item.material:
-                parts.append(item.material.name)
-
-        return " ".join(parts)
-
-
     padding_x = mm_to_pt(getattr(s, "label_padding_mm", DEFAULT_LABEL_PADDING_MM) or DEFAULT_LABEL_PADDING_MM)
     qr_box = mm_to_pt(getattr(s, "label_qr_size_mm", DEFAULT_LABEL_QR_SIZE_MM) or DEFAULT_LABEL_QR_SIZE_MM) if include_qr else 0
     qr_margin = mm_to_pt(getattr(s, "label_qr_margin_mm", DEFAULT_LABEL_QR_MARGIN_MM) or DEFAULT_LABEL_QR_MARGIN_MM) if qr_box else 0
@@ -2994,17 +2938,6 @@ def labels_pdf():
     base_pos_block_w = mm_to_pt(getattr(s, "label_position_width_mm", DEFAULT_LABEL_POSITION_WIDTH_MM) or DEFAULT_LABEL_POSITION_WIDTH_MM)
     position_font_size = getattr(s, "label_position_font_pt", DEFAULT_LABEL_POSITION_FONT_PT) or DEFAULT_LABEL_POSITION_FONT_PT
     position_line_height = position_font_size + 0.6
-
-    def _fmt_mm(v):
-        if v is None:
-            return None
-        try:
-            v = float(v)
-        except (TypeError, ValueError):
-            return None
-        if abs(v - round(v)) < 0.01:
-            return str(int(round(v)))
-        return f"{v:.1f}".rstrip("0").rstrip(".")
 
     def _type_text(item: Item) -> str:
         # Base: name o descrizione auto-generata, senza la categoria duplicata
@@ -3030,16 +2963,16 @@ def labels_pdf():
                 parts.append(item.thread_size)
 
             if item.inner_d_mm:
-                v = _fmt_mm(item.inner_d_mm)
+                v = format_mm_short(item.inner_d_mm)
                 if v is not None:
                     parts.append(f"Øi{v}")
 
             if item.outer_d_mm:
-                v = _fmt_mm(item.outer_d_mm)
+                v = format_mm_short(item.outer_d_mm)
                 if v is not None:
                     parts.append(f"Øe{v}")
 
-            v = _fmt_mm(unified_thickness_value(item))
+            v = format_mm_short(unified_thickness_value(item))
             if v is not None:
                 parts.append(f"s{v}")
 
@@ -3047,7 +2980,7 @@ def labels_pdf():
                 return " ".join(parts)
 
         # Per gli altri oggetti: se c'è spessore, aggiungi un breve "sX"
-        v = _fmt_mm(unified_thickness_value(item))
+        v = format_mm_short(unified_thickness_value(item))
         if v is not None and f"s{v}" not in base:
             base = f"{base} s{v}"
 
@@ -3138,7 +3071,8 @@ def labels_pdf():
         cy = y + lab_h - max(padding_x, mm_to_pt(1.0))
 
         # --- Riga 1: Categoria + Sottotipo + Misura ---
-        line1_text = entry.get("summary") if entry.get("is_multi") else _line1(item)
+        base_lines = [] if entry.get("is_multi") else label_lines_for_item(item)
+        line1_text = entry.get("summary") if entry.get("is_multi") else (base_lines[0] if base_lines else "")
         if line1_text:
             line1_lines = wrap_to_lines(line1_text, cat_font, cat_size, text_right_limit, max_lines=1)
             if line1_lines:
@@ -3147,7 +3081,7 @@ def labels_pdf():
                 cy -= (cat_size + 0.6)
 
         # --- Riga 2: specifiche a seconda della categoria ---
-        line2_text = None if entry.get("is_multi") else _line2(item)
+        line2_text = None if entry.get("is_multi") else (base_lines[1] if len(base_lines) > 1 else "")
         if line2_text:
             line2_lines = wrap_to_lines(line2_text, title_font, title_size, text_right_limit, max_lines=1)
             if line2_lines:
