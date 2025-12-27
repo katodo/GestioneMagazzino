@@ -1234,7 +1234,15 @@ def add_item():
         _assign_position(item, int(cab_id), col_code, int(row_num))
     db.session.commit()
     flash("Articolo aggiunto", "success")
-    return redirect(url_for("admin_items"))
+    keep_params = {
+        "keep_category_id": item.category_id,
+        "keep_material_id": item.material_id,
+        "keep_finish_id": item.finish_id,
+        "keep_description": item.description or "",
+        "keep_thread_size": item.thread_size or "",
+    }
+    keep_params = {k: v for k, v in keep_params.items() if v not in (None, "")}
+    return redirect(url_for("admin_items", **keep_params))
 
 @app.route("/admin/items/<int:item_id>/edit", methods=["GET","POST"])
 @login_required
@@ -2872,21 +2880,29 @@ def seed_if_empty_or_missing():
     for code, label, order in thread_standards:
         if not ThreadStandard.query.filter_by(code=code).first():
             db.session.add(ThreadStandard(code=code, label=label, sort_order=order))
-    # categorie (con colori)
-    defaults = [
-        ("Viti","#2E7D32"), ("Dadi","#1565C0"), ("Rondelle","#F9A825"), ("Torrette","#6A1B9A"),
-        ("Grani","#8E24AA"), ("Prigionieri","#3949AB"), ("Inserti e rivetti","#00897B"),
-        ("Seeger e spine","#5D4037"), ("Distanziali","#00796B"), ("Boccole","#546E7A"), ("O-Ring","#D84315")
-    ]
-    for name,color in defaults:
-        if not Category.query.filter_by(name=name).first():
-            db.session.add(Category(name=name, color=color))
-    for m in ["Acciaio","Inox A2","Inox A4","Ottone","Alluminio","Rame","Nylon","Ottone nichelato","Bronzo","PTFE","EPDM","Viton","Silicone"]:
-        if not Material.query.filter_by(name=m).first():
-            db.session.add(Material(name=m))
-    for f in ["Zincato bianco","Zincato nero","Brunitura","Nichelato","Grezzo","Anodizzato"]:
-        if not Finish.query.filter_by(name=f).first():
-            db.session.add(Finish(name=f))
+
+    # categorie/materiali/finiture predefinite solo su db vuoto
+    has_categories = Category.query.count() > 0
+    has_materials = Material.query.count() > 0
+    has_finishes = Finish.query.count() > 0
+
+    if not has_categories:
+        defaults = [
+            ("Viti","#2E7D32"), ("Dadi","#1565C0"), ("Rondelle","#F9A825"), ("Torrette","#6A1B9A"),
+            ("Grani","#8E24AA"), ("Prigionieri","#3949AB"), ("Inserti e rivetti","#00897B"),
+            ("Seeger e spine","#5D4037"), ("Distanziali","#00796B"), ("Boccole","#546E7A"), ("O-Ring","#D84315")
+        ]
+        for name,color in defaults:
+            if not Category.query.filter_by(name=name).first():
+                db.session.add(Category(name=name, color=color))
+    if not has_materials:
+        for m in ["Acciaio","Inox A2","Inox A4","Ottone","Alluminio","Rame","Nylon","Ottone nichelato","Bronzo","PTFE","EPDM","Viton","Silicone"]:
+            if not Material.query.filter_by(name=m).first():
+                db.session.add(Material(name=m))
+    if not has_finishes:
+        for f in ["Zincato bianco","Zincato nero","Brunitura","Nichelato","Grezzo","Anodizzato"]:
+            if not Finish.query.filter_by(name=f).first():
+                db.session.add(Finish(name=f))
     db.session.commit()
 
     standards_by_code = {s.code: s for s in ThreadStandard.query.all()}

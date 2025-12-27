@@ -55,7 +55,7 @@
         <select class="form-select" name="category_id" id="catSel" required>
           <option value="">—</option>
           {% for c in categories %}
-            <option value="{{ c.id }}">{{ c.name }}</option>
+            <option value="{{ c.id }}" {{ 'selected' if request.args.get('keep_category_id', type=int)==c.id else '' }}>{{ c.name }}</option>
           {% endfor %}
         </select>
         <div class="invalid-feedback">Seleziona una categoria.</div>
@@ -77,7 +77,7 @@
       </div>
       <div class="col-md-8 field-block" data-field-key="thread_size">
         <label class="form-label">Misura (es. M3 / 1/4-20)</label>
-        <input class="form-control" name="thread_size" id="sizeInput" list="sizes-{{ default_standard_code }}">
+        <input class="form-control" name="thread_size" id="sizeInput" list="sizes-{{ default_standard_code }}" value="{{ request.args.get('keep_thread_size','') }}">
         {% for std in thread_standards %}
           <datalist id="sizes-{{ std.code }}">
             {% for s in sizes_by_standard.get(std.code, []) %}<option value="{{ s }}">{% endfor %}
@@ -102,20 +102,20 @@
         <label class="form-label">Materiale</label>
         <select class="form-select" name="material_id">
           <option value="">—</option>
-          {% for m in materials %}<option value="{{ m.id }}">{{ m.name }}</option>{% endfor %}
+          {% for m in materials %}<option value="{{ m.id }}" {{ 'selected' if request.args.get('keep_material_id', type=int)==m.id else '' }}>{{ m.name }}</option>{% endfor %}
         </select>
       </div>
       <div class="col-md-6 field-block" data-field-key="finish_id">
         <label class="form-label">Finitura</label>
         <select class="form-select" name="finish_id">
           <option value="">—</option>
-          {% for f in finishes %}<option value="{{ f.id }}">{{ f.name }}</option>{% endfor %}
+          {% for f in finishes %}<option value="{{ f.id }}" {{ 'selected' if request.args.get('keep_finish_id', type=int)==f.id else '' }}>{{ f.name }}</option>{% endfor %}
         </select>
       </div>
 
       <div class="col-md-12 field-block" data-field-key="description">
         <label class="form-label">Descrizione (opz.)</label>
-        <input type="text" class="form-control" name="description">
+        <input type="text" class="form-control" name="description" value="{{ request.args.get('keep_description','') }}">
       </div>
 
       {% if custom_fields %}
@@ -330,6 +330,19 @@ function switchDatalist(stdSelId, inputId){
     inp.removeAttribute('list');
   }
 }
+function clearKeepParams(){
+  const params = new URLSearchParams(window.location.search);
+  const keys = ["keep_category_id","keep_material_id","keep_finish_id","keep_description","keep_thread_size"];
+  let changed = false;
+  keys.forEach(k=>{
+    if (params.has(k)) { params.delete(k); changed = true; }
+  });
+  if (changed) {
+    const qs = params.toString();
+    const newUrl = window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash;
+    window.history.replaceState({}, '', newUrl);
+  }
+}
 
 document.addEventListener('DOMContentLoaded', ()=>{
   if ($.fn.DataTable) {
@@ -343,13 +356,19 @@ document.addEventListener('DOMContentLoaded', ()=>{
   document.getElementById('chkAll')?.addEventListener('change', (e)=>{
     document.querySelectorAll('input[name="item_ids"]').forEach(cb=> cb.checked = e.target.checked);
   });
-  applyFieldVisibility(parseInt(document.getElementById('catSel').value || 0));
-  document.getElementById('catSel').addEventListener('change', e=>{
+  const catSel = document.getElementById('catSel');
+  const initialCat = parseInt(catSel?.value || 0);
+  if (initialCat) {
+    populateSubtypes(initialCat, 'subtypeSel');
+  }
+  applyFieldVisibility(initialCat);
+  catSel?.addEventListener('change', e=>{
     const catId = parseInt(e.target.value||0);
     populateSubtypes(catId, 'subtypeSel');
     applyFieldVisibility(catId);
   });
   document.getElementById('stdSel').addEventListener('change', ()=>switchDatalist('stdSel','sizeInput'));
+  clearKeepParams();
 
   // Se arrivo qui da "Nuovo articolo…" sulla griglia,
   // precompilo i campi posizione nel form "Nuovo articolo"
