@@ -1123,9 +1123,35 @@ def admin_items():
         selectinload(Item.finish),
         selectinload(Item.subtype),
     )
+    text_q = (request.args.get("q") or "").strip()
+    category_id = request.args.get("category_id", type=int)
+    material_id = request.args.get("material_id", type=int)
+    finish_id = request.args.get("finish_id", type=int)
+    thread_size_q = (request.args.get("thread_size") or "").strip()
+    share_filter = request.args.get("share_drawer")
     pos_cabinet_id = request.args.get("pos_cabinet_id", type=int)
     pos_col = (request.args.get("pos_col") or "").strip().upper()
     pos_row = request.args.get("pos_row", type=int)
+
+    if text_q:
+        text_q_lower = text_q.lower()
+        items_q = items_q.filter(or_(
+            func.lower(Item.name).contains(text_q_lower),
+            func.lower(Item.description).contains(text_q_lower),
+        ))
+    if category_id:
+        items_q = items_q.filter(Item.category_id == category_id)
+    if material_id:
+        items_q = items_q.filter(Item.material_id == material_id)
+    if finish_id:
+        items_q = items_q.filter(Item.finish_id == finish_id)
+    if thread_size_q:
+        items_q = items_q.filter(func.lower(Item.thread_size).contains(thread_size_q.lower()))
+    if share_filter == "1":
+        items_q = items_q.filter(Item.share_drawer.is_(True))
+    elif share_filter == "0":
+        items_q = items_q.filter(Item.share_drawer.is_(False))
+
     if pos_cabinet_id or pos_col or pos_row:
         pos_q = db.session.query(Assignment.item_id).join(Slot, Assignment.slot_id == Slot.id)
         if pos_cabinet_id:
@@ -1394,8 +1420,16 @@ def _can_share_slot(existing_items: list[Item], new_item: Item) -> bool:
         return True
     if not new_item.share_drawer:
         return False
-    if any(not getattr(it, "share_drawer", False) for it in existing_items):
-        return False
+    measure_new = (new_item.thread_size or "").strip().lower()
+    category_new = new_item.category_id
+    for it in existing_items:
+        if not getattr(it, "share_drawer", False):
+            return False
+        if getattr(it, "category_id", None) != category_new:
+            return False
+        measure_existing = (getattr(it, "thread_size", None) or "").strip().lower()
+        if measure_existing != measure_new:
+            return False
     return True
 
 def _assign_position(item, cabinet_id:int, col_code:str, row_num:int):
