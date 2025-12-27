@@ -145,6 +145,27 @@
         <label class="form-label">Quantità</label>
         <input type="number" min="0" step="1" class="form-control" name="quantity" value="0">
       </div>
+
+      <div class="col-12"><hr></div>
+
+      <div class="col-md-4">
+        <label class="form-label">Cassettiera</label>
+        <select class="form-select" name="cabinet_id">
+          <option value="">(assegna dopo)</option>
+          {% for c in cabinets %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Colonna (A..ZZ)</label>
+        <input class="form-control" name="col_code" placeholder="es. D">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Riga (1..128)</label>
+        <input type="number" min="1" max="128" class="form-control" name="row_num">
+      </div>
+
+      <div class="col-12"><hr></div>
+
       <div class="col-md-4 field-block" data-field-key="share_drawer">
         <label class="form-label">Condividi cassetto</label>
         <div class="form-check">
@@ -152,7 +173,6 @@
           <label class="form-check-label" for="shareDrawerNew">Permetti di condividere il cassetto con altri articoli compatibili</label>
         </div>
       </div>
-
       <div class="col-md-8">
         <label class="form-label d-block">Campi in etichetta</label>
         <div class="form-check form-check-inline">
@@ -181,24 +201,6 @@
         </div>
       </div>
 
-      <div class="col-12"><hr></div>
-
-      <div class="col-md-4">
-        <label class="form-label">Cassettiera</label>
-        <select class="form-select" name="cabinet_id">
-          <option value="">(assegna dopo)</option>
-          {% for c in cabinets %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
-        </select>
-      </div>
-      <div class="col-md-4">
-        <label class="form-label">Colonna (A..ZZ)</label>
-        <input class="form-control" name="col_code" placeholder="es. D">
-      </div>
-      <div class="col-md-4">
-        <label class="form-label">Riga (1..128)</label>
-        <input type="number" min="1" max="128" class="form-control" name="row_num">
-      </div>
-
       <div class="col-12 text-end">
         <button class="btn btn-primary">Salva</button>
       </div>
@@ -207,8 +209,55 @@
 </div>
 
 <div class="form-section mb-3">
-  <form id="positionFilter" method="get" action="{{ url_for('admin_items') }}" class="row g-2 align-items-end mb-2">
-    <div class="col-md-4">
+  <h5 class="mb-3">Elenco</h5>
+  <form id="itemFilter" method="get" action="{{ url_for('admin_items') }}" class="row g-2 align-items-end mb-3">
+    <div class="col-12">
+      <div class="text-uppercase text-muted small fw-semibold">Filtro</div>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label small text-muted mb-1">Testo</label>
+      <input type="text" name="q" class="form-control" placeholder="Nome o descrizione" value="{{ request.args.get('q','') }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small text-muted mb-1">Categoria</label>
+      <select name="category_id" class="form-select">
+        <option value="">Tutte</option>
+        {% for c in categories %}
+          <option value="{{ c.id }}" {{ 'selected' if (request.args.get('category_id')|int)==c.id else '' }}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small text-muted mb-1">Materiale</label>
+      <select name="material_id" class="form-select">
+        <option value="">Tutti</option>
+        {% for m in materials %}
+          <option value="{{ m.id }}" {{ 'selected' if (request.args.get('material_id')|int)==m.id else '' }}>{{ m.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small text-muted mb-1">Finitura</label>
+      <select name="finish_id" class="form-select">
+        <option value="">Tutte</option>
+        {% for f in finishes %}
+          <option value="{{ f.id }}" {{ 'selected' if (request.args.get('finish_id')|int)==f.id else '' }}>{{ f.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small text-muted mb-1">Misura</label>
+      <input type="text" name="thread_size" class="form-control" placeholder="es. M3" value="{{ request.args.get('thread_size','') }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small text-muted mb-1">Condivisione</label>
+      <select name="share_drawer" class="form-select">
+        <option value="">Tutte</option>
+        <option value="1" {{ 'selected' if request.args.get('share_drawer')=='1' else '' }}>Condivisibili</option>
+        <option value="0" {{ 'selected' if request.args.get('share_drawer')=='0' else '' }}>Non condivise</option>
+      </select>
+    </div>
+    <div class="col-md-3">
       <label class="form-label small text-muted mb-1">Cassettiera</label>
       <select name="pos_cabinet_id" class="form-select">
         <option value="">Tutte</option>
@@ -225,14 +274,13 @@
       <label class="form-label small text-muted mb-1">Riga</label>
       <input type="number" min="1" max="128" name="pos_row" class="form-control" placeholder="1..128" value="{{ request.args.get('pos_row','') }}">
     </div>
-    <div class="col-md-4 d-flex gap-2">
-      <button class="btn btn-outline-primary btn-sm flex-grow-1">Filtra posizione</button>
+    <div class="col-md-3 d-flex gap-2">
+      <button class="btn btn-outline-primary btn-sm flex-grow-1">Filtra</button>
       <a href="{{ url_for('admin_items') }}" class="btn btn-outline-secondary btn-sm">Reset</a>
     </div>
   </form>
   <form id="labelForm" method="post" action="{{ url_for('labels_pdf') }}">
     <div class="d-flex justify-content-between align-items-center mb-2">
-      <h5 class="mb-0">Elenco</h5>
       <div class="text-end">
         <div class="d-flex gap-2 justify-content-end">
           <button class="btn btn-sm btn-primary" type="submit" formaction="{{ url_for('labels_pdf') }}">Stampa etichette</button>
@@ -255,12 +303,13 @@
             <th>Materiale</th>
             <th>Q.ta</th>
             <th>Posizione</th>
+            <th>Condiviso</th>
             <th>Azione</th>
           </tr>
         </thead>
         <tbody>
           {% for it in items %}
-          <tr>
+          <tr data-edit-url="{{ url_for('edit_item', item_id=it.id) }}">
             <td><input type="checkbox" name="item_ids" value="{{ it.id }}"></td>
             <td>{{ it.id }}</td>
             <td>{% if it.category %}<span class="badge-color" style="background:{{ it.category.color }}"></span>{{ it.category.name }}{% endif %}</td>
@@ -280,6 +329,7 @@
               <span class="ms-2 fw-semibold">{{ it.quantity }}</span>
             </td>
             <td>{{ pos_by_item.get(it.id, '') }}</td>
+            <td class="text-center">{% if it.share_drawer %}&#10003;{% endif %}</td>
             <td class="text-nowrap">
               <a href="{{ url_for('edit_item', item_id=it.id) }}" class="btn btn-sm btn-outline-primary">Modifica</a>
               <form method="post" action="{{ url_for('delete_item', item_id=it.id) }}" class="d-inline" onsubmit="return confirm('Eliminare articolo?')">
@@ -356,12 +406,29 @@ function clearKeepParams(){
 }
 
 document.addEventListener('DOMContentLoaded', ()=>{
+  const tableSelector = '#admItemsTable';
+  const excludedSelectors = 'a, button, input, label, select';
   if ($.fn.DataTable) {
-    $('#admItemsTable').DataTable({
+    const dt = $(tableSelector).DataTable({
       pageLength:25,
       lengthMenu:[10, 25, 50, 100],
       order:[[1,'asc']],
       language: { search: "Cerca nella tabella:" }
+    });
+    $(`${tableSelector} tbody`).on('click', 'tr', function(e){
+      if ($(e.target).closest(excludedSelectors).length) return;
+      const url = this.dataset.editUrl;
+      if (url) window.location.href = url;
+    });
+    $(`${tableSelector} tbody tr`).addClass('cursor-pointer');
+  } else {
+    document.querySelectorAll(`${tableSelector} tbody tr`).forEach(row=>{
+      row.classList.add('cursor-pointer');
+      row.addEventListener('click', (e)=>{
+        if (e.target.closest(excludedSelectors)) return;
+        const url = row.dataset.editUrl;
+        if (url) window.location.href = url;
+      });
     });
   }
   document.getElementById('chkAll')?.addEventListener('change', (e)=>{
