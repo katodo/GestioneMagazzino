@@ -99,6 +99,13 @@
       <label class="form-label">Quantità</label>
       <input type="number" min="0" step="1" class="form-control" name="quantity" value="{{ item.quantity }}">
     </div>
+    <div class="col-md-4 field-block" data-field-key="share_drawer">
+      <label class="form-label">Condividi cassetto</label>
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" name="share_drawer" id="shareDrawerEdit" {{ 'checked' if item.share_drawer else '' }}>
+        <label class="form-check-label" for="shareDrawerEdit">Consenti di condividere il cassetto con altri articoli</label>
+      </div>
+    </div>
 
     <div class="col-md-8">
       <label class="form-label d-block">Campi in etichetta</label>
@@ -187,7 +194,7 @@ function applyFieldVisibility(catId){
   const enabled = new Set(CATEGORY_FIELDS[catId]);
   document.querySelectorAll('[data-field-key]').forEach(el=>{
     const key = el.dataset.fieldKey;
-    if (key === 'category_id') {
+    if (key === 'category_id' || key === 'share_drawer') {
       el.style.display = '';
       return;
     }

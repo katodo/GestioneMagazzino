@@ -145,6 +145,13 @@
         <label class="form-label">Quantità</label>
         <input type="number" min="0" step="1" class="form-control" name="quantity" value="0">
       </div>
+      <div class="col-md-4 field-block" data-field-key="share_drawer">
+        <label class="form-label">Condividi cassetto</label>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" name="share_drawer" id="shareDrawerNew">
+          <label class="form-check-label" for="shareDrawerNew">Permetti di condividere il cassetto con altri articoli compatibili</label>
+        </div>
+      </div>
 
       <div class="col-md-8">
         <label class="form-label d-block">Campi in etichetta</label>
@@ -226,8 +233,12 @@
   <form id="labelForm" method="post" action="{{ url_for('labels_pdf') }}">
     <div class="d-flex justify-content-between align-items-center mb-2">
       <h5 class="mb-0">Elenco</h5>
-      <div>
-        <button class="btn btn-sm btn-primary">Stampa etichette</button>
+      <div class="text-end">
+        <div class="d-flex gap-2 justify-content-end">
+          <button class="btn btn-sm btn-primary" type="submit" formaction="{{ url_for('labels_pdf') }}">Stampa etichette</button>
+          <button class="btn btn-sm btn-outline-primary" type="submit" formaction="{{ url_for('cards_pdf') }}">Stampa Cartellini</button>
+        </div>
+        <div class="form-text">Se non selezioni nulla, verranno stampati tutti gli articoli.</div>
       </div>
     </div>
     <div class="table-responsive table-sticky">
@@ -305,7 +316,7 @@ function applyFieldVisibility(catId){
   const enabled = new Set(CATEGORY_FIELDS[catId]);
   document.querySelectorAll('[data-field-key]').forEach(el=>{
     const key = el.dataset.fieldKey;
-    if (key === 'category_id') {
+    if (key === 'category_id' || key === 'share_drawer') {
       el.style.display = '';
       return;
     }

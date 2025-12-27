@@ -116,14 +116,11 @@
                 </td>
               {% else %}
                 {% set bg = cell.entries[0].color if cell.entries else '#6c757d' %}
-                <td class="cell-used" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" style="background:{{ bg }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
+                <td class="cell-used" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" data-items='{{ cell.entries|tojson }}' style="background:{{ bg }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
                   <div class="cell-inner">
-                    {% for e in cell.entries[:2] %}
-                      <div>{{ e.text }}</div>
+                    {% for e in cell.entries %}
+                      <div class="cell-line">{{ e.text }}</div>
                     {% endfor %}
-                    {% if cell.entries|length > 2 %}
-                      <div>+{{ cell.entries|length-2 }}</div>
-                    {% endif %}
                   </div>
                 </td>
               {% endif %}
@@ -141,6 +138,46 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function(){
+  function escapeHtml(str){
+    return (str || '').replace(/[&<>"']/g, function(m) {
+      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m] || m);
+    });
+  }
+  function initCellPopovers(gridId){
+    const grid = document.getElementById(gridId);
+    if (!grid || typeof bootstrap === 'undefined') return;
+    grid.querySelectorAll('td.cell-used').forEach(td=>{
+      const raw = td.dataset.items;
+      if (!raw) return;
+      let items = [];
+      try { items = JSON.parse(raw); } catch { items = []; }
+      if (!items.length) return;
+      const content = items.map(it=>{
+        const detailParts = [];
+        if (it.thread_size) detailParts.push(it.thread_size);
+        if (it.quantity !== null && it.quantity !== undefined) detailParts.push(`Q.ta ${it.quantity}`);
+        if (it.share_drawer) detailParts.push('Condividi cassetto');
+        return `
+          <div class="d-flex align-items-start mb-1">
+            <span class="badge-color flex-shrink-0 mt-1" style="background:${it.color || '#999'};"></span>
+            <div class="ms-2">
+              <div class="fw-semibold">${escapeHtml(it.name || it.text || '')}</div>
+              ${it.description ? `<div class="small text-muted">${escapeHtml(it.description)}</div>` : ''}
+              ${detailParts.length ? `<div class="small">${detailParts.map(escapeHtml).join(' · ')}</div>` : ''}
+              ${it.position ? `<div class="small text-muted">Pos: ${escapeHtml(it.position)}</div>` : ''}
+            </div>
+          </div>`;
+      }).join('');
+      new bootstrap.Popover(td, {
+        trigger:'hover focus',
+        placement:'top',
+        html:true,
+        title:'Dettaglio cassetto',
+        content: `<div class="popover-items">${content}</div>`
+      });
+    });
+  }
+
   const categorySelect = document.getElementById('categorySelect');
   const countInput = document.getElementById('countInput');
   const unplacedCount = document.getElementById('unplacedCount');
@@ -158,6 +195,7 @@ document.addEventListener('DOMContentLoaded', function(){
   }
   const grid = document.getElementById('autoGrid');
   if (!grid) return;
+  initCellPopovers('autoGrid');
   grid.addEventListener('click', function(e){
     const td = e.target.closest('td');
     if (!td) return;

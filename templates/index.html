@@ -48,12 +48,11 @@
                 <td class="cell-blocked" data-col="{{ col }}" data-row="{{ r }}" data-cat="blocked" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>—</td>
               {% elif cell.entries and (cell.entries|length)>0 %}
                 {% set colhex = cell.entries[0].color %}
-                {% set texts = (cell.entries | map(attribute='text') | list) %}
-                <td class="cell-used" style="background: {{ colhex }}" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
+                <td class="cell-used" style="background: {{ colhex }}" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" data-items='{{ cell.entries|tojson }}' {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
                   <div class="cell-inner">
-                    {% if texts|length>0 %}<div>{{ texts[0] }}</div>{% endif %}
-                    {% if texts|length>1 %}<div>{{ texts[1] }}</div>{% endif %}
-                    {% if texts|length>2 %}<div>+{{ texts|length-2 }}</div>{% endif %}
+                    {% for entry in cell.entries %}
+                      <div class="cell-line">{{ entry.text }}</div>
+                    {% endfor %}
                   </div>
                 </td>
               {% else %}
@@ -436,10 +435,52 @@ function publishSlotMqtt(col, row) {
   }).catch(() => {});
 }
 
+function escapeHtml(str){
+  return (str || '').replace(/[&<>"']/g, function(m) {
+    return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m] || m);
+  });
+}
+
+function initCellPopovers(gridId){
+  const grid = document.getElementById(gridId);
+  if (!grid || typeof bootstrap === 'undefined') return;
+  grid.querySelectorAll('td.cell-used').forEach(td=>{
+    const raw = td.dataset.items;
+    if (!raw) return;
+    let items = [];
+    try { items = JSON.parse(raw); } catch { items = []; }
+    if (!items.length) return;
+    const content = items.map(it=>{
+      const detailParts = [];
+      if (it.thread_size) detailParts.push(it.thread_size);
+      if (it.quantity !== null && it.quantity !== undefined) detailParts.push(`Q.ta ${it.quantity}`);
+      if (it.share_drawer) detailParts.push('Condividi cassetto');
+      return `
+        <div class="d-flex align-items-start mb-1">
+          <span class="badge-color flex-shrink-0 mt-1" style="background:${it.color || '#999'};"></span>
+          <div class="ms-2">
+            <div class="fw-semibold">${escapeHtml(it.name || it.text || '')}</div>
+            ${it.description ? `<div class="small text-muted">${escapeHtml(it.description)}</div>` : ''}
+            ${detailParts.length ? `<div class="small">${detailParts.map(escapeHtml).join(' · ')}</div>` : ''}
+            ${it.position ? `<div class="small text-muted">Pos: ${escapeHtml(it.position)}</div>` : ''}
+          </div>
+        </div>`;
+    }).join('');
+    new bootstrap.Popover(td, {
+      trigger:'hover focus',
+      placement:'top',
+      html:true,
+      title:'Dettaglio cassetto',
+      content: `<div class="popover-items">${content}</div>`
+    });
+  });
+}
+
 document.addEventListener('DOMContentLoaded', function(){
   const grid = document.getElementById('grid');
   if (!grid) return;
   let pendingUsedCell = null;
+  initCellPopovers('grid');
 
   {% if is_admin %}
   const assignModalEl = document.getElementById('assignModal');
