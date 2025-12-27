@@ -1405,14 +1405,230 @@ def clear_position(item_id):
     flash("Posizione rimossa.", "success")
     return redirect(url_for("edit_item", item_id=item_id))
 
+def _admin_config_url(anchor=None):
+    base = url_for("admin_config")
+    return f"{base}#{anchor}" if anchor else base
+
 # ===================== ADMIN: CATEGORIE =====================
 @app.route("/admin/categories")
 @login_required
 def admin_categories():
+    return redirect(_admin_config_url("categorie"))
+
+@app.route("/admin/categories/add", methods=["POST"])
+@login_required
+def add_category():
+    name = request.form.get("name","").strip()
+    color = request.form.get("color","#000000").strip()
+    if len(name) < 2: return _flash_back("Nome categoria troppo corto.", "danger", "admin_config", "categorie")
+    if Category.query.filter_by(name=name).first(): return _flash_back("Categoria già esistente.", "danger", "admin_config", "categorie")
+    db.session.add(Category(name=name, color=color)); db.session.commit()
+    flash("Categoria aggiunta.", "success"); return redirect(_admin_config_url("categorie"))
+
+@app.route("/admin/categories/<int:cat_id>/update", methods=["POST"])
+@login_required
+def update_category(cat_id):
+    cat = Category.query.get_or_404(cat_id)
+    new_name = request.form.get("name","").strip()
+    new_color = request.form.get("color","#000000").strip()
+    if new_name and new_name != cat.name:
+        if Category.query.filter(Category.id != cat.id, Category.name == new_name).first():
+            return _flash_back("Esiste già una categoria con questo nome.", "danger", "admin_config", "categorie")
+        cat.name = new_name
+    cat.color = new_color or cat.color
+    db.session.commit()
+    flash("Categoria aggiornata.", "success"); return redirect(_admin_config_url("categorie"))
+
+@app.route("/admin/categories/<int:cat_id>/delete", methods=["POST"])
+@login_required
+def delete_category(cat_id):
+    cat = Category.query.get_or_404(cat_id)
+    used = Item.query.filter_by(category_id=cat.id).first()
+    if used:
+        flash("Impossibile eliminare: ci sono articoli associati.", "danger")
+    else:
+        db.session.delete(cat); db.session.commit(); flash("Categoria eliminata.", "success")
+    return redirect(_admin_config_url("categorie"))
+
+def _flash_back(msg, kind, endpoint, anchor=None):
+    flash(msg, kind)
+    url = url_for(endpoint)
+    if anchor:
+        url = f"{url}#{anchor}"
+    return redirect(url)
+
+@app.route("/admin/subtypes/add", methods=["POST"])
+@login_required
+def add_subtype():
+    name = (request.form.get("name") or "").strip()
+    try:
+        category_id = int(request.form.get("category_id") or 0)
+    except Exception:
+        category_id = 0
+
+    if category_id <= 0:
+        return _flash_back("Seleziona una categoria valida per il sottotipo.", "danger", "admin_config", "sottotipi")
+    if len(name) < 2:
+        return _flash_back("Nome sottotipo troppo corto.", "danger", "admin_config", "sottotipi")
+
+    # univoco per categoria (rispetta il vincolo uq_subtype_per_category)
+    exists = Subtype.query.filter_by(category_id=category_id, name=name).first()
+    if exists:
+        return _flash_back("Esiste già un sottotipo con questo nome per la categoria selezionata.", "danger", "admin_config", "sottotipi")
+
+    db.session.add(Subtype(category_id=category_id, name=name))
+    db.session.commit()
+    flash("Sottotipo aggiunto.", "success")
+    return redirect(_admin_config_url("sottotipi"))
+
+
+@app.route("/admin/subtypes/<int:st_id>/update", methods=["POST"])
+@login_required
+def update_subtype(st_id):
+    st = Subtype.query.get_or_404(st_id)
+    name = (request.form.get("name") or "").strip()
+    try:
+        category_id = int(request.form.get("category_id") or st.category_id)
+    except Exception:
+        category_id = st.category_id
+
+    if len(name) < 2:
+        return _flash_back("Nome sottotipo troppo corto.", "danger", "admin_config", "sottotipi")
+
+    # evita duplicati nella stessa categoria
+    clash = (
+        Subtype.query
+        .filter(Subtype.id != st.id,
+                Subtype.category_id == category_id,
+                Subtype.name == name)
+        .first()
+    )
+    if clash:
+        return _flash_back("Esiste già un sottotipo con questo nome per la categoria selezionata.", "danger", "admin_config", "sottotipi")
+
+    st.name = name
+    st.category_id = category_id
+    db.session.commit()
+    flash("Sottotipo aggiornato.", "success")
+    return redirect(_admin_config_url("sottotipi"))
+
+
+@app.route("/admin/subtypes/<int:st_id>/delete", methods=["POST"])
+@login_required
+def delete_subtype(st_id):
+    st = Subtype.query.get_or_404(st_id)
+    used = Item.query.filter_by(subtype_id=st.id).first()
+    if used:
+        flash("Impossibile eliminare: ci sono articoli associati a questo sottotipo.", "danger")
+    else:
+        db.session.delete(st)
+        db.session.commit()
+        flash("Sottotipo eliminato.", "success")
+    return redirect(_admin_config_url("sottotipi"))
+
+@app.route("/admin/materials/add", methods=["POST"])
+@login_required
+def add_material():
+    name = (request.form.get("name") or "").strip()
+    if len(name) < 2:
+        return _flash_back("Nome materiale troppo corto.", "danger", "admin_config", "materiali")
+    if Material.query.filter_by(name=name).first():
+        return _flash_back("Materiale già esistente.", "danger", "admin_config", "materiali")
+
+    db.session.add(Material(name=name))
+    db.session.commit()
+    flash("Materiale aggiunto.", "success")
+    return redirect(_admin_config_url("materiali"))
+
+
+@app.route("/admin/materials/<int:mat_id>/update", methods=["POST"])
+@login_required
+def update_material(mat_id):
+    mat = Material.query.get_or_404(mat_id)
+    name = (request.form.get("name") or "").strip()
+    if len(name) < 2:
+        return _flash_back("Nome materiale troppo corto.", "danger", "admin_config", "materiali")
+    if Material.query.filter(Material.id != mat.id, Material.name == name).first():
+        return _flash_back("Esiste già un materiale con questo nome.", "danger", "admin_config", "materiali")
+
+    mat.name = name
+    db.session.commit()
+    flash("Materiale aggiornato.", "success")
+    return redirect(_admin_config_url("materiali"))
+
+
+@app.route("/admin/materials/<int:mat_id>/delete", methods=["POST"])
+@login_required
+def delete_material(mat_id):
+    mat = Material.query.get_or_404(mat_id)
+    used = Item.query.filter_by(material_id=mat.id).first()
+    if used:
+        flash("Impossibile eliminare: ci sono articoli che usano questo materiale.", "danger")
+    else:
+        db.session.delete(mat)
+        db.session.commit()
+        flash("Materiale eliminato.", "success")
+    return redirect(_admin_config_url("materiali"))
+
+@app.route("/admin/finishes/add", methods=["POST"])
+@login_required
+def add_finish():
+    name = (request.form.get("name") or "").strip()
+    if len(name) < 2:
+        return _flash_back("Nome finitura troppo corto.", "danger", "admin_config", "finiture")
+    if Finish.query.filter_by(name=name).first():
+        return _flash_back("Finitura già esistente.", "danger", "admin_config", "finiture")
+
+    db.session.add(Finish(name=name))
+    db.session.commit()
+    flash("Finitura aggiunta.", "success")
+    return redirect(_admin_config_url("finiture"))
+
+
+@app.route("/admin/finishes/<int:fin_id>/update", methods=["POST"])
+@login_required
+def update_finish(fin_id):
+    fin = Finish.query.get_or_404(fin_id)
+    name = (request.form.get("name") or "").strip()
+    if len(name) < 2:
+        return _flash_back("Nome finitura troppo corto.", "danger", "admin_config", "finiture")
+    if Finish.query.filter(Finish.id != fin.id, Finish.name == name).first():
+        return _flash_back("Esiste già una finitura con questo nome.", "danger", "admin_config", "finiture")
+
+    fin.name = name
+    db.session.commit()
+    flash("Finitura aggiornata.", "success")
+    return redirect(_admin_config_url("finiture"))
+
+
+@app.route("/admin/finishes/<int:fin_id>/delete", methods=["POST"])
+@login_required
+def delete_finish(fin_id):
+    fin = Finish.query.get_or_404(fin_id)
+    used = Item.query.filter_by(finish_id=fin.id).first()
+    if used:
+        flash("Impossibile eliminare: ci sono articoli che usano questa finitura.", "danger")
+    else:
+        db.session.delete(fin)
+        db.session.commit()
+        flash("Finitura eliminata.", "success")
+    return redirect(_admin_config_url("finiture"))
+
+# ===================== ADMIN: CONFIGURAZIONE =====================
+@app.route("/admin/config")
+@login_required
+def admin_config():
+    locations = Location.query.order_by(Location.name).all()
+    cabinets  = db.session.query(Cabinet, Location).join(Location, Cabinet.location_id==Location.id).order_by(Cabinet.name).all()
+    drawer_merges = (
+        db.session.query(DrawerMerge, Cabinet)
+        .join(Cabinet, DrawerMerge.cabinet_id == Cabinet.id)
+        .order_by(Cabinet.name, DrawerMerge.row_start, DrawerMerge.col_start)
+        .all()
+    )
     categories = Category.query.order_by(Category.name).all()
     materials  = Material.query.order_by(Material.name).all()
     finishes   = Finish.query.order_by(Finish.name).all()
-    # elenco sottotipi con categoria associata (per mostrare ed editare)
     subtypes   = (
         db.session.query(Subtype, Category)
         .join(Category, Subtype.category_id == Category.id)
@@ -1447,226 +1663,6 @@ def admin_categories():
         .distinct()
         .all()
     }
-    return render_template(
-        "admin/categories.html",
-        categories=categories,
-        materials=materials,
-        finishes=finishes,
-        subtypes=subtypes,
-        used_subtypes=used_subtypes,
-        used_materials=used_materials,
-        used_finishes=used_finishes,
-        used_categories=used_categories,
-    )
-
-@app.route("/admin/categories/add", methods=["POST"])
-@login_required
-def add_category():
-    name = request.form.get("name","").strip()
-    color = request.form.get("color","#000000").strip()
-    if len(name) < 2: return _flash_back("Nome categoria troppo corto.", "danger", "admin_categories")
-    if Category.query.filter_by(name=name).first(): return _flash_back("Categoria già esistente.", "danger", "admin_categories")
-    db.session.add(Category(name=name, color=color)); db.session.commit()
-    flash("Categoria aggiunta.", "success"); return redirect(url_for("admin_categories"))
-
-@app.route("/admin/categories/<int:cat_id>/update", methods=["POST"])
-@login_required
-def update_category(cat_id):
-    cat = Category.query.get_or_404(cat_id)
-    new_name = request.form.get("name","").strip()
-    new_color = request.form.get("color","#000000").strip()
-    if new_name and new_name != cat.name:
-        if Category.query.filter(Category.id != cat.id, Category.name == new_name).first():
-            return _flash_back("Esiste già una categoria con questo nome.", "danger", "admin_categories")
-        cat.name = new_name
-    cat.color = new_color or cat.color
-    db.session.commit()
-    flash("Categoria aggiornata.", "success"); return redirect(url_for("admin_categories"))
-
-@app.route("/admin/categories/<int:cat_id>/delete", methods=["POST"])
-@login_required
-def delete_category(cat_id):
-    cat = Category.query.get_or_404(cat_id)
-    used = Item.query.filter_by(category_id=cat.id).first()
-    if used:
-        flash("Impossibile eliminare: ci sono articoli associati.", "danger")
-    else:
-        db.session.delete(cat); db.session.commit(); flash("Categoria eliminata.", "success")
-    return redirect(url_for("admin_categories"))
-
-def _flash_back(msg, kind, endpoint):
-    flash(msg, kind); return redirect(url_for(endpoint))
-
-@app.route("/admin/subtypes/add", methods=["POST"])
-@login_required
-def add_subtype():
-    name = (request.form.get("name") or "").strip()
-    try:
-        category_id = int(request.form.get("category_id") or 0)
-    except Exception:
-        category_id = 0
-
-    if category_id <= 0:
-        return _flash_back("Seleziona una categoria valida per il sottotipo.", "danger", "admin_categories")
-    if len(name) < 2:
-        return _flash_back("Nome sottotipo troppo corto.", "danger", "admin_categories")
-
-    # univoco per categoria (rispetta il vincolo uq_subtype_per_category)
-    exists = Subtype.query.filter_by(category_id=category_id, name=name).first()
-    if exists:
-        return _flash_back("Esiste già un sottotipo con questo nome per la categoria selezionata.", "danger", "admin_categories")
-
-    db.session.add(Subtype(category_id=category_id, name=name))
-    db.session.commit()
-    flash("Sottotipo aggiunto.", "success")
-    return redirect(url_for("admin_categories"))
-
-
-@app.route("/admin/subtypes/<int:st_id>/update", methods=["POST"])
-@login_required
-def update_subtype(st_id):
-    st = Subtype.query.get_or_404(st_id)
-    name = (request.form.get("name") or "").strip()
-    try:
-        category_id = int(request.form.get("category_id") or st.category_id)
-    except Exception:
-        category_id = st.category_id
-
-    if len(name) < 2:
-        return _flash_back("Nome sottotipo troppo corto.", "danger", "admin_categories")
-
-    # evita duplicati nella stessa categoria
-    clash = (
-        Subtype.query
-        .filter(Subtype.id != st.id,
-                Subtype.category_id == category_id,
-                Subtype.name == name)
-        .first()
-    )
-    if clash:
-        return _flash_back("Esiste già un sottotipo con questo nome per la categoria selezionata.", "danger", "admin_categories")
-
-    st.name = name
-    st.category_id = category_id
-    db.session.commit()
-    flash("Sottotipo aggiornato.", "success")
-    return redirect(url_for("admin_categories"))
-
-
-@app.route("/admin/subtypes/<int:st_id>/delete", methods=["POST"])
-@login_required
-def delete_subtype(st_id):
-    st = Subtype.query.get_or_404(st_id)
-    used = Item.query.filter_by(subtype_id=st.id).first()
-    if used:
-        flash("Impossibile eliminare: ci sono articoli associati a questo sottotipo.", "danger")
-    else:
-        db.session.delete(st)
-        db.session.commit()
-        flash("Sottotipo eliminato.", "success")
-    return redirect(url_for("admin_categories"))
-
-@app.route("/admin/materials/add", methods=["POST"])
-@login_required
-def add_material():
-    name = (request.form.get("name") or "").strip()
-    if len(name) < 2:
-        return _flash_back("Nome materiale troppo corto.", "danger", "admin_categories")
-    if Material.query.filter_by(name=name).first():
-        return _flash_back("Materiale già esistente.", "danger", "admin_categories")
-
-    db.session.add(Material(name=name))
-    db.session.commit()
-    flash("Materiale aggiunto.", "success")
-    return redirect(url_for("admin_categories"))
-
-
-@app.route("/admin/materials/<int:mat_id>/update", methods=["POST"])
-@login_required
-def update_material(mat_id):
-    mat = Material.query.get_or_404(mat_id)
-    name = (request.form.get("name") or "").strip()
-    if len(name) < 2:
-        return _flash_back("Nome materiale troppo corto.", "danger", "admin_categories")
-    if Material.query.filter(Material.id != mat.id, Material.name == name).first():
-        return _flash_back("Esiste già un materiale con questo nome.", "danger", "admin_categories")
-
-    mat.name = name
-    db.session.commit()
-    flash("Materiale aggiornato.", "success")
-    return redirect(url_for("admin_categories"))
-
-
-@app.route("/admin/materials/<int:mat_id>/delete", methods=["POST"])
-@login_required
-def delete_material(mat_id):
-    mat = Material.query.get_or_404(mat_id)
-    used = Item.query.filter_by(material_id=mat.id).first()
-    if used:
-        flash("Impossibile eliminare: ci sono articoli che usano questo materiale.", "danger")
-    else:
-        db.session.delete(mat)
-        db.session.commit()
-        flash("Materiale eliminato.", "success")
-    return redirect(url_for("admin_categories"))
-
-@app.route("/admin/finishes/add", methods=["POST"])
-@login_required
-def add_finish():
-    name = (request.form.get("name") or "").strip()
-    if len(name) < 2:
-        return _flash_back("Nome finitura troppo corto.", "danger", "admin_categories")
-    if Finish.query.filter_by(name=name).first():
-        return _flash_back("Finitura già esistente.", "danger", "admin_categories")
-
-    db.session.add(Finish(name=name))
-    db.session.commit()
-    flash("Finitura aggiunta.", "success")
-    return redirect(url_for("admin_categories"))
-
-
-@app.route("/admin/finishes/<int:fin_id>/update", methods=["POST"])
-@login_required
-def update_finish(fin_id):
-    fin = Finish.query.get_or_404(fin_id)
-    name = (request.form.get("name") or "").strip()
-    if len(name) < 2:
-        return _flash_back("Nome finitura troppo corto.", "danger", "admin_categories")
-    if Finish.query.filter(Finish.id != fin.id, Finish.name == name).first():
-        return _flash_back("Esiste già una finitura con questo nome.", "danger", "admin_categories")
-
-    fin.name = name
-    db.session.commit()
-    flash("Finitura aggiornata.", "success")
-    return redirect(url_for("admin_categories"))
-
-
-@app.route("/admin/finishes/<int:fin_id>/delete", methods=["POST"])
-@login_required
-def delete_finish(fin_id):
-    fin = Finish.query.get_or_404(fin_id)
-    used = Item.query.filter_by(finish_id=fin.id).first()
-    if used:
-        flash("Impossibile eliminare: ci sono articoli che usano questa finitura.", "danger")
-    else:
-        db.session.delete(fin)
-        db.session.commit()
-        flash("Finitura eliminata.", "success")
-    return redirect(url_for("admin_categories"))
-
-# ===================== ADMIN: CONFIGURAZIONE =====================
-@app.route("/admin/config")
-@login_required
-def admin_config():
-    locations = Location.query.order_by(Location.name).all()
-    cabinets  = db.session.query(Cabinet, Location).join(Location, Cabinet.location_id==Location.id).order_by(Cabinet.name).all()
-    drawer_merges = (
-        db.session.query(DrawerMerge, Cabinet)
-        .join(Cabinet, DrawerMerge.cabinet_id == Cabinet.id)
-        .order_by(Cabinet.name, DrawerMerge.row_start, DrawerMerge.col_start)
-        .all()
-    )
-    categories = Category.query.order_by(Category.name).all()
     custom_fields = CustomField.query.order_by(CustomField.sort_order, CustomField.name).all()
     serialized_custom_fields = serialize_custom_fields(custom_fields)
     field_defs = build_field_definitions(serialized_custom_fields)
@@ -1680,6 +1676,13 @@ def admin_config():
         settings=get_settings(),
         mqtt_settings=get_mqtt_settings(),
         categories=categories,
+        materials=materials,
+        finishes=finishes,
+        subtypes=subtypes,
+        used_subtypes=used_subtypes,
+        used_materials=used_materials,
+        used_finishes=used_finishes,
+        used_categories=used_categories,
         custom_fields=serialized_custom_fields,
         field_defs=field_defs,
         category_fields=category_fields,
@@ -1701,7 +1704,7 @@ def update_category_fields(cat_id):
             db.session.add(CategoryFieldSetting(category_id=category.id, field_key=key, is_enabled=True))
     db.session.commit()
     flash(f"Campi aggiornati per {category.name}.", "success")
-    return redirect(url_for("admin_config"))
+    return redirect(_admin_config_url("campi-categoria"))
 
 @app.route("/admin/custom_fields/add", methods=["POST"])
 @login_required

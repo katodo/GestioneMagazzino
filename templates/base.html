@@ -71,7 +71,6 @@
           <a href="{{ url_for('admin_items') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint == 'admin_items' else '' }}">Articoli</a>
           <a href="{{ url_for('to_place') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint == 'to_place' else '' }}">Da posizionare</a>
           <a href="{{ url_for('auto_assign') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint == 'auto_assign' else '' }}">Assegnamento</a>
-          <a href="{{ url_for('admin_categories') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint == 'admin_categories' else '' }}">Categorie</a>
           <a href="{{ url_for('admin_config') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint == 'admin_config' else '' }}">Configurazione</a>
           <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Logout</a>
         {% else %}
