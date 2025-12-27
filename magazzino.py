@@ -5,6 +5,7 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from sqlalchemy import func, select, or_, text
 from sqlalchemy.orm import selectinload
 from datetime import datetime, timezone
+from typing import Optional
 import json
 import os, io, csv
 
@@ -339,17 +340,63 @@ def merge_cells_from_region(region):
 def make_full_position(cab_name: str, col_code: str, row_num: int) -> str:
     return f"{cab_name}-{col_code.upper()}{int(row_num)}"
 
-def is_washer(item:Item)->bool:
-    return (item.category and item.category.name.lower()=="rondelle")
+CATEGORY_ROLE_ALIASES = {
+    "washer": ["rondelle"],
+    "screw": ["viti"],
+    "standoff": ["torrette"],
+    "spacer": ["distanziali"],
+}
 
-def is_screw(item:Item)->bool:
-    return (item.category and item.category.name.lower()=="viti")
+_CATEGORY_ROLE_IDS = {}
 
-def is_standoff(item:Item)->bool:
-    return (item.category and item.category.name.lower()=="torrette")
 
-def is_spacer(item:Item)->bool:
-    return (item.category and item.category.name.lower()=="distanziali")
+def _normalize_name(value: Optional[str]) -> str:
+    return (value or "").strip().lower()
+
+
+def _category_role_id(role: str) -> Optional[int]:
+    cid = _CATEGORY_ROLE_IDS.get(role)
+    if cid:
+        return cid
+
+    aliases = CATEGORY_ROLE_ALIASES.get(role, [])
+    if not aliases:
+        return None
+
+    name_to_id = {
+        _normalize_name(name): cid
+        for cid, name in Category.query.with_entities(Category.id, Category.name)
+    }
+    for alias in aliases:
+        cid = name_to_id.get(_normalize_name(alias))
+        if cid:
+            _CATEGORY_ROLE_IDS[role] = cid
+            return cid
+    return None
+
+
+def reset_category_role_cache() -> None:
+    _CATEGORY_ROLE_IDS.clear()
+
+
+def is_washer(item: Item) -> bool:
+    cat_id = _category_role_id("washer")
+    return bool(cat_id and item.category_id == cat_id)
+
+
+def is_screw(item: Item) -> bool:
+    cat_id = _category_role_id("screw")
+    return bool(cat_id and item.category_id == cat_id)
+
+
+def is_standoff(item: Item) -> bool:
+    cat_id = _category_role_id("standoff")
+    return bool(cat_id and item.category_id == cat_id)
+
+
+def is_spacer(item: Item) -> bool:
+    cat_id = _category_role_id("spacer")
+    return bool(cat_id and item.category_id == cat_id)
 
 def auto_name_for(item:Item)->str:
     parts=[]
