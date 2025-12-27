@@ -3,7 +3,8 @@
 <h3>Assegnamento automatico cassettiera</h3>
 
 <div class="form-section mb-3">
-  <form method="post">
+  <form method="post" id="autoAssignForm">
+    <input type="hidden" name="action" id="formAction" value="auto_assign">
     <div class="row g-2">
       <div class="col-md-3">
         <label class="form-label">Cassettiera</label>
@@ -69,8 +70,12 @@
           </label>
         </div>
       </div>
-      <div class="col-12 text-end">
-        <button class="btn btn-primary">Assegna automaticamente</button>
+      <div class="col-12 d-flex justify-content-between align-items-center">
+        <div class="text-muted small">La de-allocazione di una categoria comporta la ristampa di tutte le etichette e il riposizionamento dei cassetti.</div>
+        <div class="text-end">
+          <button type="button" class="btn btn-outline-danger me-2" id="clearCategoryBtn">De-alloca intera categoria</button>
+          <button class="btn btn-primary">Assegna automaticamente</button>
+        </div>
       </div>
     </div>
   </form>
@@ -211,6 +216,21 @@ document.addEventListener('DOMContentLoaded', function(){
     grid.querySelectorAll('td').forEach(c => c.classList.remove('table-primary'));
     td.classList.add('table-primary');
   });
+
+  const clearBtn = document.getElementById('clearCategoryBtn');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', function(e){
+      e.preventDefault();
+      const form = document.getElementById('autoAssignForm');
+      if (!form) return;
+      const firstConfirm = confirm('Confermi di voler de-allocare TUTTA la categoria dalla cassettiera selezionata?');
+      if (!firstConfirm) return;
+      const secondConfirm = confirm('Operazione invasiva: sarà necessario ristampare tutte le etichette e riposizionare i cassetti. Procedere comunque?');
+      if (!secondConfirm) return;
+      document.getElementById('formAction').value = 'clear_category';
+      form.submit();
+    });
+  }
 });
 </script>
 {% endblock %}

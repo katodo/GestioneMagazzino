@@ -2426,6 +2426,45 @@ def _auto_assign_category(category_id: int,
     }
 
 
+def _deallocate_category_from_cabinet(category_id: int, cabinet_id: int):
+    cab = db.session.get(Cabinet, int(cabinet_id))
+    if not cab:
+        raise ValueError("Cassettiera inesistente.")
+
+    cat = db.session.get(Category, int(category_id))
+    if not cat:
+        raise ValueError("Categoria inesistente.")
+
+    assigns = (
+        db.session.query(Assignment.id, Assignment.slot_id)
+        .join(Item, Assignment.item_id == Item.id)
+        .join(Slot, Assignment.slot_id == Slot.id)
+        .filter(Item.category_id == int(category_id), Slot.cabinet_id == int(cabinet_id))
+        .all()
+    )
+
+    if not assigns:
+        return {
+            "removed": 0,
+            "slots": 0,
+            "cabinet": cab.name,
+            "category": cat.name,
+        }
+
+    assign_ids = [a.id for a in assigns]
+    slot_ids = {a.slot_id for a in assigns}
+
+    deleted = Assignment.query.filter(Assignment.id.in_(assign_ids)).delete(synchronize_session=False)
+    db.session.commit()
+
+    return {
+        "removed": deleted,
+        "slots": len(slot_ids),
+        "cabinet": cab.name,
+        "category": cat.name,
+    }
+
+
 @app.route("/admin/auto_assign", methods=["GET", "POST"])
 @login_required
 def auto_assign():
@@ -2455,19 +2494,62 @@ def auto_assign():
 
     if request.method == "POST":
         form = request.form
+        action = form.get("action") or "auto_assign"
         try:
             form_cabinet_id  = int(form.get("cabinet_id") or 0)
             form_category_id = int(form.get("category_id") or 0)
-            primary_key      = form.get("primary_key") or "length_mm"
-            secondary_key    = form.get("secondary_key") or ""
-            direction        = (form.get("direction") or "H").upper()
-            count_val        = max(1, int(form.get("count") or "1"))
-            start_col        = (form.get("start_col") or "").strip().upper()
-            start_row        = int(form.get("start_row") or "0")
-            clear_occupied   = bool(form.get("clear_occupied"))
         except Exception:
             flash("Parametri non validi per l'assegnamento automatico.", "danger")
             return redirect(url_for("auto_assign"))
+
+        primary_key    = form.get("primary_key") or primary_key or "length_mm"
+        secondary_key  = form.get("secondary_key") or ""
+        direction      = (form.get("direction") or direction or "H").upper()
+        count_val      = max(1, int(form.get("count") or (count_val or 1)))
+        start_col      = (form.get("start_col") or start_col or "").strip().upper()
+        start_row_raw  = form.get("start_row")
+        start_row      = int(start_row_raw) if (start_row_raw not in (None, "")) else start_row
+        clear_occupied = bool(form.get("clear_occupied"))
+
+        if action == "clear_category":
+            if not (form_cabinet_id and form_category_id):
+                flash("Seleziona cassettiera e categoria da de-allocare.", "danger")
+            else:
+                try:
+                    res = _deallocate_category_from_cabinet(form_category_id, form_cabinet_id)
+                    removed = res["removed"]
+                    slots = res["slots"]
+                    cat_name = res.get("category")
+                    cab_name = res.get("cabinet")
+                    if removed:
+                        msg = (
+                            f"De-allocati {removed} articoli della categoria \"{cat_name}\" "
+                            f"dalla cassettiera \"{cab_name}\"."
+                        )
+                        if slots:
+                            msg += f" Cassetti liberati: {slots}."
+                        msg += " Dovrai ristampare le etichette e riposizionare i cassetti."
+                        flash(msg, "warning")
+                    else:
+                        flash("Nessun articolo di questa categoria è assegnato nella cassettiera selezionata.", "info")
+                except ValueError as e:
+                    flash(str(e), "danger")
+                except Exception as e:
+                    db.session.rollback()
+                    flash(f"Errore durante la de-allocazione: {e}", "danger")
+
+            return redirect(url_for(
+                "auto_assign",
+                cabinet_id=form_cabinet_id or "",
+                category_id=form_category_id or "",
+                primary_key=primary_key,
+                secondary_key=secondary_key,
+                direction=direction,
+                count=count_val,
+                start_col=start_col,
+                start_row=start_row or "",
+                clear_occupied=int(clear_occupied),
+            ))
 
         if not (form_cabinet_id and form_category_id and start_col and start_row):
             flash("Seleziona cassettiera, categoria e cella di partenza.", "danger")
