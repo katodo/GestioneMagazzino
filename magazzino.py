@@ -86,6 +86,7 @@ class MqttSettings(db.Model):
     include_item_id = db.Column(db.Boolean, nullable=False, default=True)
     include_item_name = db.Column(db.Boolean, nullable=False, default=True)
     include_item_category = db.Column(db.Boolean, nullable=False, default=True)
+    include_item_category_color = db.Column(db.Boolean, nullable=False, default=False)
     include_item_quantity = db.Column(db.Boolean, nullable=False, default=True)
     include_item_position = db.Column(db.Boolean, nullable=False, default=True)
     include_item_description = db.Column(db.Boolean, nullable=False, default=False)
@@ -411,6 +412,29 @@ def ensure_item_columns():
             db.session.rollback()
             return
 
+def ensure_mqtt_settings_columns():
+    """Aggiunge eventuali nuove colonne della configurazione MQTT (compatibilità DB esistenti)."""
+    try:
+        rows = db.session.execute(text("PRAGMA table_info(mqtt_settings)")).fetchall()
+    except Exception:
+        return
+    existing_cols = {r[1] for r in rows}
+    new_cols = [
+        ("include_item_category_color", "BOOLEAN", 0),
+    ]
+    added = False
+    for col_name, col_type, default_val in new_cols:
+        if col_name not in existing_cols:
+            try:
+                default_sql = f" DEFAULT {default_val}" if default_val is not None else ""
+                db.session.execute(text(f"ALTER TABLE mqtt_settings ADD COLUMN {col_name} {col_type}{default_sql}"))
+                added = True
+            except Exception:
+                db.session.rollback()
+                return
+    if added:
+        db.session.commit()
+
 def get_settings()->Settings:
     ensure_settings_columns()
     ensure_item_columns()
@@ -442,6 +466,7 @@ def get_settings()->Settings:
     return s
 
 def get_mqtt_settings() -> MqttSettings:
+    ensure_mqtt_settings_columns()
     s = MqttSettings.query.get(1)
     if not s:
         s = MqttSettings(
@@ -514,6 +539,8 @@ def mqtt_payload_for_slot(cabinet: Cabinet, col_code: str, row_num: int, setting
                     item_data["name"] = auto_name_for(it)
                 if settings.include_item_category:
                     item_data["category"] = cat.name if cat else None
+                if settings.include_item_category_color:
+                    item_data["category_color"] = cat.color if cat else None
                 if settings.include_item_quantity:
                     item_data["quantity"] = it.quantity
                 if settings.include_item_position:
@@ -1878,6 +1905,7 @@ def update_mqtt_settings():
         s.include_item_id = bool(request.form.get("include_item_id"))
         s.include_item_name = bool(request.form.get("include_item_name"))
         s.include_item_category = bool(request.form.get("include_item_category"))
+        s.include_item_category_color = bool(request.form.get("include_item_category_color"))
         s.include_item_quantity = bool(request.form.get("include_item_quantity"))
         s.include_item_position = bool(request.form.get("include_item_position"))
         s.include_item_description = bool(request.form.get("include_item_description"))

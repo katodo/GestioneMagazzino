@@ -400,6 +400,10 @@
             <label class="form-check-label" for="mqtt_include_item_category">Categoria</label>
           </div>
           <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="include_item_category_color" id="mqtt_include_item_category_color" {{ 'checked' if mqtt_settings.include_item_category_color else '' }}>
+            <label class="form-check-label" for="mqtt_include_item_category_color">Colore categoria</label>
+          </div>
+          <div class="form-check">
             <input class="form-check-input" type="checkbox" name="include_item_quantity" id="mqtt_include_item_quantity" {{ 'checked' if mqtt_settings.include_item_quantity else '' }}>
             <label class="form-check-label" for="mqtt_include_item_quantity">Quantità</label>
           </div>
