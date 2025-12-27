@@ -55,7 +55,7 @@
         <select class="form-select" name="category_id" id="catSel" required>
           <option value="">—</option>
           {% for c in categories %}
-            <option value="{{ c.id }}" {{ 'selected' if request.args.get('keep_category_id', type=int)==c.id else '' }}>{{ c.name }}</option>
+            <option value="{{ c.id }}" {{ 'selected' if (request.args.get('keep_category_id')|int)==c.id else '' }}>{{ c.name }}</option>
           {% endfor %}
         </select>
         <div class="invalid-feedback">Seleziona una categoria.</div>
@@ -102,14 +102,14 @@
         <label class="form-label">Materiale</label>
         <select class="form-select" name="material_id">
           <option value="">—</option>
-          {% for m in materials %}<option value="{{ m.id }}" {{ 'selected' if request.args.get('keep_material_id', type=int)==m.id else '' }}>{{ m.name }}</option>{% endfor %}
+          {% for m in materials %}<option value="{{ m.id }}" {{ 'selected' if (request.args.get('keep_material_id')|int)==m.id else '' }}>{{ m.name }}</option>{% endfor %}
         </select>
       </div>
       <div class="col-md-6 field-block" data-field-key="finish_id">
         <label class="form-label">Finitura</label>
         <select class="form-select" name="finish_id">
           <option value="">—</option>
-          {% for f in finishes %}<option value="{{ f.id }}" {{ 'selected' if request.args.get('keep_finish_id', type=int)==f.id else '' }}>{{ f.name }}</option>{% endfor %}
+          {% for f in finishes %}<option value="{{ f.id }}" {{ 'selected' if (request.args.get('keep_finish_id')|int)==f.id else '' }}>{{ f.name }}</option>{% endfor %}
         </select>
       </div>
 
