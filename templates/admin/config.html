@@ -36,7 +36,9 @@
               {% for field in field_defs %}
               <td class="text-center">
                 <div class="form-check d-flex justify-content-center m-0">
-                  <input class="form-check-input" type="checkbox" name="field_keys" value="{{ field.key }}" id="field-{{ cat.id }}-{{ field.key }}" form="cat-fields-{{ cat.id }}" {{ 'checked' if field.key in category_fields.get(cat.id, []) else '' }}>
+                  {% set field_used = field.key in used_category_fields.get(cat.id, []) %}
+                  {% set field_enabled = field_used or field.key in category_fields.get(cat.id, []) %}
+                  <input class="form-check-input" type="checkbox" name="field_keys" value="{{ field.key }}" id="field-{{ cat.id }}-{{ field.key }}" form="cat-fields-{{ cat.id }}" {{ 'checked' if field_enabled else '' }} {{ 'disabled' if field_used else '' }} title="{{ 'Campo in uso: non disattivabile' if field_used else '' }}">
                 </div>
               </td>
               {% endfor %}
