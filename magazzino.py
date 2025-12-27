@@ -2567,6 +2567,38 @@ def auto_assign():
 
 
 # ===================== ETICHETTE PDF =====================
+def wrap_to_lines(text: str, font_name: str, font_size: float, max_width_pt: float, max_lines: int = 2):
+    from reportlab.pdfbase import pdfmetrics
+
+    if not text:
+        return []
+    words = text.split()
+    lines = []
+    cur = ""
+    for w in words:
+        test = (cur + " " + w).strip()
+        if pdfmetrics.stringWidth(test, font_name, font_size) <= max_width_pt:
+            cur = test
+        else:
+            if cur:
+                lines.append(cur)
+                if len(lines) == max_lines:
+                    return lines
+                cur = w
+            else:
+                for i in range(len(w), 0, -1):
+                    piece = w[:i] + "…"
+                    if pdfmetrics.stringWidth(piece, font_name, font_size) <= max_width_pt:
+                        lines.append(piece)
+                        cur = ""
+                        break
+                if len(lines) == max_lines:
+                    return lines
+    if cur and len(lines) < max_lines:
+        lines.append(cur)
+    return lines
+
+
 @app.route("/admin/labels/pdf", methods=["POST"])
 @login_required
 def labels_pdf():
@@ -2581,33 +2613,6 @@ def labels_pdf():
     except Exception:
         flash("Per la stampa etichette installa reportlab: pip install reportlab", "danger")
         return redirect(request.referrer or url_for("admin_items"))
-
-    def wrap_to_lines(text: str, font_name: str, font_size: float, max_width_pt: float, max_lines: int = 2):
-        if not text: return []
-        words = text.split()
-        lines = []
-        cur = ""
-        for w in words:
-            test = (cur + " " + w).strip()
-            if pdfmetrics.stringWidth(test, font_name, font_size) <= max_width_pt:
-                cur = test
-            else:
-                if cur:
-                    lines.append(cur)
-                    if len(lines) == max_lines:
-                        return lines
-                    cur = w
-                else:
-                    for i in range(len(w), 0, -1):
-                        piece = w[:i] + "…"
-                        if pdfmetrics.stringWidth(piece, font_name, font_size) <= max_width_pt:
-                            lines.append(piece); cur = ""
-                            break
-                    if len(lines) == max_lines:
-                        return lines
-        if cur and len(lines) < max_lines:
-            lines.append(cur)
-        return lines
 
     ids = request.form.getlist("item_ids")
     if not ids:
