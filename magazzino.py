@@ -630,6 +630,72 @@ def build_category_field_map(categories):
             enabled_by_cat[cat.id] = set()
     return {cat_id: sorted(keys) for cat_id, keys in enabled_by_cat.items()}
 
+def get_used_field_keys_by_category():
+    used = {}
+    rows = db.session.query(
+        Item.category_id,
+        Item.subtype_id,
+        Item.thread_standard,
+        Item.thread_size,
+        Item.outer_d_mm,
+        Item.length_mm,
+        Item.inner_d_mm,
+        Item.material_id,
+        Item.finish_id,
+        Item.description,
+        Item.quantity,
+        Item.thickness_mm,
+    ).all()
+
+    for (
+        category_id,
+        subtype_id,
+        thread_standard,
+        thread_size,
+        outer_d_mm,
+        length_mm,
+        inner_d_mm,
+        material_id,
+        finish_id,
+        description,
+        quantity,
+        thickness_mm,
+    ) in rows:
+        cat_used = used.setdefault(category_id, set())
+        if subtype_id is not None:
+            cat_used.add("subtype_id")
+        if thread_standard:
+            cat_used.add("thread_standard")
+        if thread_size:
+            cat_used.add("thread_size")
+        if outer_d_mm is not None:
+            cat_used.add("outer_d_mm")
+        if length_mm is not None:
+            cat_used.add("length_mm")
+        if thickness_mm is not None:
+            cat_used.update({"thickness_mm", "length_mm"})
+        if inner_d_mm is not None:
+            cat_used.add("inner_d_mm")
+        if material_id is not None:
+            cat_used.add("material_id")
+        if finish_id is not None:
+            cat_used.add("finish_id")
+        if description:
+            cat_used.add("description")
+        if quantity is not None:
+            cat_used.add("quantity")
+
+    custom_values = (
+        db.session.query(Item.category_id, ItemCustomFieldValue.field_id)
+        .join(Item, Item.id == ItemCustomFieldValue.item_id)
+        .distinct()
+        .all()
+    )
+    for category_id, field_id in custom_values:
+        used.setdefault(category_id, set()).add(custom_field_key(field_id))
+
+    return {cat_id: sorted(keys) for cat_id, keys in used.items()}
+
 def build_field_definitions(custom_fields):
     defs = [{"key": f["key"], "label": f["label"], "is_custom": False} for f in BUILTIN_FIELD_DEFS]
     for field in custom_fields:
@@ -1374,6 +1440,13 @@ def admin_categories():
         .distinct()
         .all()
     }
+    used_categories = {
+        cat_id
+        for (cat_id,) in db.session.query(Item.category_id)
+        .filter(Item.category_id.isnot(None))
+        .distinct()
+        .all()
+    }
     return render_template(
         "admin/categories.html",
         categories=categories,
@@ -1383,6 +1456,7 @@ def admin_categories():
         used_subtypes=used_subtypes,
         used_materials=used_materials,
         used_finishes=used_finishes,
+        used_categories=used_categories,
     )
 
 @app.route("/admin/categories/add", methods=["POST"])
@@ -1597,6 +1671,7 @@ def admin_config():
     serialized_custom_fields = serialize_custom_fields(custom_fields)
     field_defs = build_field_definitions(serialized_custom_fields)
     category_fields = build_category_field_map(categories)
+    used_category_fields = get_used_field_keys_by_category()
     return render_template(
         "admin/config.html",
         locations=locations,
@@ -1608,18 +1683,21 @@ def admin_config():
         custom_fields=serialized_custom_fields,
         field_defs=field_defs,
         category_fields=category_fields,
+        used_category_fields=used_category_fields,
     )
 
 @app.route("/admin/config/fields/<int:cat_id>/update", methods=["POST"])
 @login_required
 def update_category_fields(cat_id):
     category = Category.query.get_or_404(cat_id)
-    selected_keys = request.form.getlist("field_keys")
+    selected_keys = set(request.form.getlist("field_keys"))
+    used_fields = get_used_field_keys_by_category().get(category.id, [])
+    selected_keys.update(used_fields)
     CategoryFieldSetting.query.filter_by(category_id=category.id).delete()
     if not selected_keys:
         db.session.add(CategoryFieldSetting(category_id=category.id, field_key="__none__", is_enabled=False))
     else:
-        for key in selected_keys:
+        for key in sorted(selected_keys):
             db.session.add(CategoryFieldSetting(category_id=category.id, field_key=key, is_enabled=True))
     db.session.commit()
     flash(f"Campi aggiornati per {category.name}.", "success")

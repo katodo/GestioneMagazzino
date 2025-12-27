@@ -24,7 +24,11 @@
                 </div>
                 <div class="col-md-4">
                   <button class="btn btn-sm btn-primary">Salva</button>
-                  <button formaction="{{ url_for('delete_category', cat_id=c.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger" onclick="return confirm('Eliminare categoria?')">Elimina</button>
+                  {% if c.id in used_categories %}
+                    <button class="btn btn-sm btn-outline-secondary" type="button" disabled title="Categoria in uso">Elimina</button>
+                  {% else %}
+                    <button formaction="{{ url_for('delete_category', cat_id=c.id) }}" formmethod="post" class="btn btn-sm btn-outline-danger" onclick="return confirm('Eliminare categoria?')">Elimina</button>
+                  {% endif %}
                 </div>
               </form>
             </td>
