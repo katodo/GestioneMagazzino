@@ -42,14 +42,19 @@
     .cell-used { cursor: pointer; }
     .cell-inner {
       padding: 4px 6px;
-      line-height: 1.05;
-      display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+      line-height: 1.1;
       overflow: hidden;
       font-size: 11px;
       color: #fff;
       font-weight: 600;
       text-shadow: 0 1px 1px rgba(0,0,0,.35);
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      align-items: flex-start;
+      justify-content: flex-start;
     }
+    .cell-line { width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .legend span { display:inline-block; width:12px; height:12px; margin-right:6px; border-radius:2px; }
     .action-bar { background: #fff; border-radius: 12px; padding: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
     .kpi-card { background: #fff; border-radius: 12px; padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }

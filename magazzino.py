@@ -205,6 +205,7 @@ class Item(db.Model):
     subtype_id  = db.Column(db.Integer, db.ForeignKey("subtype.id"), nullable=True)
     name = db.Column(db.String(120), nullable=False, default="")  # auto-composizione
     description = db.Column(db.String(255), nullable=True)
+    share_drawer = db.Column(db.Boolean, nullable=False, default=False)
     # filettatura / misura
     thread_standard = db.Column(db.String(8), nullable=True)  # M, UNC, UNF
     thread_size     = db.Column(db.String(32), nullable=True) # "M3", "1/4-20", ...
@@ -395,8 +396,24 @@ def ensure_settings_columns():
     if added:
         db.session.commit()
 
+def ensure_item_columns():
+    """Garantisce la presenza delle nuove colonne nella tabella items (compatibilità DB esistenti)."""
+    try:
+        rows = db.session.execute(text("PRAGMA table_info(item)")).fetchall()
+    except Exception:
+        return
+    existing_cols = {r[1] for r in rows}
+    if "share_drawer" not in existing_cols:
+        try:
+            db.session.execute(text("ALTER TABLE item ADD COLUMN share_drawer BOOLEAN DEFAULT 0"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            return
+
 def get_settings()->Settings:
     ensure_settings_columns()
+    ensure_item_columns()
     s = Settings.query.get(1)
     if not s:
         s = Settings(id=1,
@@ -891,8 +908,18 @@ def build_full_grid(cabinet_id:int):
         key = f"{s.col_code}-{s.row_num}"
         cell = cells.get(key, {"blocked": False, "entries": [], "cat_id": None})
         text = short_cell_text(it)
+        summary = text.replace("\n", " · ")
         color = cat.color if cat else "#999"
-        cell["entries"].append({"text": text, "color": color})
+        cell["entries"].append({
+            "text": summary,
+            "color": color,
+            "name": auto_name_for(it),
+            "description": it.description,
+            "quantity": it.quantity,
+            "share_drawer": bool(getattr(it, "share_drawer", False)),
+            "position": f"{s.col_code}{s.row_num}",
+            "thread_size": it.thread_size,
+        })
         if cell["cat_id"] is None and it.category_id:
             cell["cat_id"] = it.category_id
         cells[key] = cell
@@ -1219,6 +1246,7 @@ def add_item():
         material_id=int(f.get("material_id")) if f.get("material_id") else None,
         finish_id=int(f.get("finish_id")) if f.get("finish_id") else None,
         quantity=int(f.get("quantity")) if f.get("quantity") else 0,
+        share_drawer=bool(f.get("share_drawer")),
         label_show_category=bool(f.get("label_show_category")),
         label_show_subtype =bool(f.get("label_show_subtype")),
         label_show_thread  =bool(f.get("label_show_thread")),
@@ -1263,6 +1291,7 @@ def edit_item(item_id):
         item.material_id = int(f.get("material_id")) if f.get("material_id") else None
         item.finish_id = int(f.get("finish_id")) if f.get("finish_id") else None
         item.quantity = int(f.get("quantity")) if f.get("quantity") else 0
+        item.share_drawer = bool(f.get("share_drawer"))
         item.label_show_category = bool(f.get("label_show_category"))
         item.label_show_subtype  = bool(f.get("label_show_subtype"))
         item.label_show_thread   = bool(f.get("label_show_thread"))
@@ -1326,6 +1355,22 @@ def delete_item(item_id):
     return redirect(url_for("admin_items"))
 
 # ---- Posizione item ----
+def _load_slot_assignments(slot_id: int, ignore_item_id: int | None = None):
+    assigns = Assignment.query.filter_by(slot_id=slot_id).all()
+    filtered = [a for a in assigns if a.item_id != ignore_item_id]
+    item_ids = [a.item_id for a in filtered]
+    items = Item.query.filter(Item.id.in_(item_ids)).all() if item_ids else []
+    return assigns, items
+
+def _can_share_slot(existing_items: list[Item], new_item: Item) -> bool:
+    if not existing_items:
+        return True
+    if not new_item.share_drawer:
+        return False
+    if any(not getattr(it, "share_drawer", False) for it in existing_items):
+        return False
+    return True
+
 def _assign_position(item, cabinet_id:int, col_code:str, row_num:int):
     if not column_code_valid(col_code):         raise ValueError("Colonna non valida (A..Z o AA..ZZ).")
     if not (1 <= int(row_num) <= 128):          raise ValueError("Riga non valida (1..128).")
@@ -1339,10 +1384,10 @@ def _assign_position(item, cabinet_id:int, col_code:str, row_num:int):
         db.session.add(slot); db.session.flush()
     if slot.is_blocked:                         raise RuntimeError("La cella è bloccata (non assegnabile).")
 
-    same_slot = Assignment.query.filter_by(slot_id=slot.id).all()
-    cats = {db.session.get(Item, a.item_id).category_id for a in same_slot} if same_slot else set()
-    if cats and (item.category_id not in cats):
-        raise RuntimeError("Lo slot selezionato contiene articoli di categoria diversa.")
+    Assignment.query.filter_by(item_id=item.id).delete()
+    same_slot, slot_items = _load_slot_assignments(slot.id, ignore_item_id=item.id)
+    if not _can_share_slot(slot_items, item):
+        raise RuntimeError("Il cassetto contiene articoli che non supportano la condivisione.")
 
     cab = db.session.get(Cabinet, int(cabinet_id))
     max_comp = cab.compartments_per_slot if cab else 6
@@ -1351,7 +1396,6 @@ def _assign_position(item, cabinet_id:int, col_code:str, row_num:int):
     if comp_no is None:
         raise RuntimeError("Nessuno scomparto libero nello slot scelto.")
 
-    Assignment.query.filter_by(item_id=item.id).delete()
     db.session.add(Assignment(slot_id=slot.id, compartment_no=comp_no, item_id=item.id))
 
 def _suggest_position(item: Item):
@@ -1373,9 +1417,11 @@ def _suggest_position(item: Item):
     for slot, cab, assign_count, min_cat, max_cat in rows:
         if slot.is_blocked or assign_count == 0:
             continue
-        if min_cat == max_cat == item.category_id:
-            if assign_count < (cab.compartments_per_slot or 6):
-                return cab.id, slot.col_code, slot.row_num
+        _, slot_items = _load_slot_assignments(slot.id)
+        if not _can_share_slot(slot_items, item):
+            continue
+        if assign_count < (cab.compartments_per_slot or 6):
+            return cab.id, slot.col_code, slot.row_num
     return None
 
 @app.route("/admin/items/<int:item_id>/suggest_position")
@@ -2302,22 +2348,49 @@ def _auto_assign_category(category_id: int,
     assignments_plan = []   # (item, col_code, row_num)
     skipped_occupied = []   # celle saltate perché già occupate (clear_occupied=False)
     reused_slots = set()    # celle che verranno liberate e riutilizzate (clear_occupied=True)
+    planned_usage = {}      # key -> numero di nuovi articoli pianificati nello slot
+    planned_items = {}      # key -> lista di Item (esistenti + pianificati) per compatibilità
 
+    idx = 0
     for col_code, row_num in _iter_cabinet_walk(cab, start_col, start_row, direction):
-        if len(assignments_plan) >= requested:
+        if idx >= requested:
             break
         slot = Slot.query.filter_by(cabinet_id=cab.id, col_code=col_code, row_num=row_num).first()
         if slot and slot.is_blocked:
             continue
-        has_content = False
+        slot_key = (col_code, row_num)
+        assigns = []
+        slot_items = []
         if slot:
-            has_content = Assignment.query.filter_by(slot_id=slot.id).first() is not None
-        if has_content and not clear_occupied:
-            skipped_occupied.append((col_code, row_num))
-            continue
+            assigns, slot_items = _load_slot_assignments(slot.id)
+        has_content = bool(assigns)
         if has_content and clear_occupied:
-            reused_slots.add((col_code, row_num))
-        assignments_plan.append((items[len(assignments_plan)], col_code, row_num))
+            reused_slots.add(slot_key)
+            slot_items = []
+            existing_count = 0
+        else:
+            existing_count = len(assigns)
+
+        planned_existing = planned_usage.get(slot_key, 0)
+        max_comp = cab.compartments_per_slot or 6
+        free_here = max_comp - existing_count - planned_existing
+        if free_here <= 0:
+            if has_content and not clear_occupied:
+                skipped_occupied.append(slot_key)
+            continue
+
+        planned_items.setdefault(slot_key, slot_items.copy())
+        while idx < requested and free_here > 0:
+            itm = items[idx]
+            if not _can_share_slot(planned_items[slot_key], itm):
+                if has_content and not clear_occupied:
+                    skipped_occupied.append(slot_key)
+                break
+            assignments_plan.append((itm, col_code, row_num))
+            planned_items[slot_key].append(itm)
+            planned_usage[slot_key] = planned_usage.get(slot_key, 0) + 1
+            idx += 1
+            free_here -= 1
 
     if not assignments_plan:
         if skipped_occupied and not clear_occupied:
@@ -2343,7 +2416,7 @@ def _auto_assign_category(category_id: int,
         db.session.rollback()
         raise
 
-    collisions_count = len(reused_slots) if clear_occupied else len(skipped_occupied)
+    collisions_count = len(reused_slots) if clear_occupied else len(set(skipped_occupied))
     return {
         "assigned": assigned,
         "cleared_slots": cleared_slots,
@@ -2538,27 +2611,70 @@ def labels_pdf():
 
     ids = request.form.getlist("item_ids")
     if not ids:
-        flash("Seleziona almeno un articolo.", "warning"); return redirect(request.referrer or url_for("admin_items"))
-    items = Item.query.filter(Item.id.in_(ids)).all()
+        ids = [row[0] for row in db.session.query(Item.id).all()]
+    items = Item.query.filter(Item.id.in_(ids)).order_by(Item.id).all()
     if not items:
         flash("Nessun articolo valido per la stampa.", "warning"); return redirect(request.referrer or url_for("admin_items"))
 
-    assignments = (db.session.query(Assignment.item_id, Cabinet.name, Slot.col_code, Slot.row_num)
+    assignments = (db.session.query(Assignment.item_id, Cabinet.name, Slot.col_code, Slot.row_num, Slot.id)
                    .join(Slot, Assignment.slot_id == Slot.id)
                    .join(Cabinet, Slot.cabinet_id == Cabinet.id)
                    .filter(Assignment.item_id.in_(ids))
                    .all())
-    pos_by_item = {a.item_id: (a.name, a.col_code, a.row_num) for a in assignments}
+    pos_by_item = {a.item_id: (a.name, a.col_code, a.row_num, a.id) for a in assignments}
     original_order = {item.id: idx for idx, item in enumerate(items)}
 
-    def _label_sort_key(item: Item):
-        pos = pos_by_item.get(item.id)
+    slot_ids = {pos[3] for pos in pos_by_item.values() if len(pos) >= 4 and pos[3]}
+    slot_contents = {}
+    if slot_ids:
+        rows = (
+            db.session.query(Item, Slot, Cabinet)
+            .join(Assignment, Assignment.item_id == Item.id)
+            .join(Slot, Assignment.slot_id == Slot.id)
+            .join(Cabinet, Slot.cabinet_id == Cabinet.id)
+            .filter(Assignment.slot_id.in_(slot_ids))
+            .all()
+        )
+        for it, slot, cab in rows:
+            key = (cab.name, slot.col_code, slot.row_num)
+            slot_contents.setdefault(key, []).append(it)
+
+    def _label_sort_key(entry):
+        items_in_entry = entry.get("items", [])
+        pos = entry.get("position")
+        base_order = min((original_order.get(it.id, 0) for it in items_in_entry), default=0)
         if pos:
             cab_name, col_code, row_num = pos
-            return (0, cab_name or "", int(row_num), colcode_to_idx(col_code), original_order[item.id])
-        return (1, original_order[item.id])
+            return (0, cab_name or "", int(row_num), colcode_to_idx(col_code), base_order)
+        return (1, base_order)
 
-    items.sort(key=_label_sort_key)
+    def _common_parts(items_list: list[Item]) -> list[str]:
+        if not items_list:
+            return []
+        parts = []
+        cats = {it.category.name for it in items_list if it.category}
+        if len(cats) == 1:
+            parts.append(next(iter(cats)))
+        subtypes = {it.subtype.name for it in items_list if it.subtype}
+        if len(subtypes) == 1:
+            parts.append(next(iter(subtypes)))
+        thread_sizes = {it.thread_size for it in items_list if it.thread_size}
+        if len(thread_sizes) == 1:
+            parts.append(next(iter(thread_sizes)))
+        def _main_value(it: Item):
+            if is_screw(it) or is_standoff(it) or is_spacer(it):
+                return getattr(it, "length_mm", None)
+            return getattr(it, "outer_d_mm", None)
+        main_values = {_fmt_mm(_main_value(it)) for it in items_list if _main_value(it) is not None}
+        if len(main_values) == 1:
+            mv = next(iter(main_values))
+            if mv is not None:
+                tag = "L" if any(is_screw(it) or is_standoff(it) or is_spacer(it) for it in items_list) else "Øe"
+                parts.append(f"{tag}{mv}")
+        materials = {it.material.name for it in items_list if it.material}
+        if len(materials) == 1:
+            parts.append(next(iter(materials)))
+        return parts
 
     s = get_settings()
     include_qr = s.qr_default
@@ -2748,7 +2864,44 @@ def labels_pdf():
         lines = wrap_to_lines(text, font_name, font_size, max_width_pt, max_lines=1)
         return lines[0] if lines else ""
 
-    for idx, item in enumerate(items):
+    label_entries = []
+    seen_slot_keys = set()
+    for item in items:
+        pos_data = pos_by_item.get(item.id)
+        if pos_data:
+            key = (pos_data[0], pos_data[1], pos_data[2])
+            if key in seen_slot_keys:
+                continue
+            seen_slot_keys.add(key)
+            slot_items = slot_contents.get(key, [item])
+            slot_items.sort(key=lambda it: original_order.get(it.id, 10**6))
+            label_entries.append({
+                "items": slot_items,
+                "position": key,
+                "is_multi": len(slot_items) > 1,
+                "color": slot_items[0].category.color if slot_items and slot_items[0].category else "#000000",
+            })
+        else:
+            label_entries.append({
+                "items": [item],
+                "position": None,
+                "is_multi": False,
+                "color": item.category.color if item.category else "#000000",
+            })
+    for entry in label_entries:
+        if entry["is_multi"]:
+            summary_parts = _common_parts(entry["items"])
+            summary = " ".join(summary_parts).strip()
+            entry["summary"] = f"{summary} - MULTY" if summary else "MULTY"
+        else:
+            entry["summary"] = None
+    label_entries.sort(key=_label_sort_key)
+
+    for idx, entry in enumerate(label_entries):
+        items_in_entry = entry["items"]
+        if not items_in_entry:
+            continue
+        item = items_in_entry[0]
         col = idx % cols
         row = (idx // cols) % rows
         if idx > 0 and idx % (cols * rows) == 0:
@@ -2761,7 +2914,7 @@ def labels_pdf():
 
         # Barra colore categoria in alto
         try:
-            colhex = item.category.color if item.category else "#000000"
+            colhex = entry.get("color") or "#000000"
             c.setFillColor(HexColor(colhex))
             c.rect(x, y + lab_h - 2, lab_w, 2, stroke=0, fill=1)
         except Exception:
@@ -2769,7 +2922,7 @@ def labels_pdf():
 
         c.setFillColorRGB(0, 0, 0)
 
-        pos_data = pos_by_item.get(item.id)
+        pos_data = entry.get("position")
         pos_texts = None
         pos_block_w = base_pos_block_w
         if pos_data:
@@ -2789,7 +2942,7 @@ def labels_pdf():
         cy = y + lab_h - max(padding_x, mm_to_pt(1.0))
 
         # --- Riga 1: Categoria + Sottotipo + Misura ---
-        line1_text = _line1(item)
+        line1_text = entry.get("summary") if entry.get("is_multi") else _line1(item)
         if line1_text:
             line1_lines = wrap_to_lines(line1_text, cat_font, cat_size, text_right_limit, max_lines=1)
             if line1_lines:
@@ -2798,7 +2951,7 @@ def labels_pdf():
                 cy -= (cat_size + 0.6)
 
         # --- Riga 2: specifiche a seconda della categoria ---
-        line2_text = _line2(item)
+        line2_text = None if entry.get("is_multi") else _line2(item)
         if line2_text:
             line2_lines = wrap_to_lines(line2_text, title_font, title_size, text_right_limit, max_lines=1)
             if line2_lines:
@@ -2808,7 +2961,7 @@ def labels_pdf():
 
         # Fallback: se per qualche motivo non abbiamo scritto nulla, uso il nome completo
         if not line1_text and not line2_text:
-            fallback = item.name or auto_name_for(item)
+            fallback = entry.get("summary") or item.name or auto_name_for(item)
             lines = wrap_to_lines(fallback, title_font, title_size, text_right_limit, max_lines=2)
             c.setFont(title_font, title_size)
             for ln in lines:
@@ -2854,10 +3007,150 @@ def labels_pdf():
     c.save(); buf.seek(0)
     return send_file(buf, as_attachment=True, download_name="etichette.pdf", mimetype="application/pdf")
 
+@app.route("/admin/cards/pdf", methods=["POST"])
+@login_required
+def cards_pdf():
+    try:
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.pagesizes import A4, portrait
+        from reportlab.lib.colors import HexColor
+    except Exception:
+        flash("Per la stampa cartellini installa reportlab: pip install reportlab", "danger")
+        return redirect(request.referrer or url_for("admin_items"))
+
+    ids = request.form.getlist("item_ids")
+    if not ids:
+        ids = [row[0] for row in db.session.query(Item.id).all()]
+    items = Item.query.options(
+        selectinload(Item.category),
+        selectinload(Item.subtype),
+        selectinload(Item.material),
+        selectinload(Item.finish),
+    ).filter(Item.id.in_(ids)).order_by(Item.id).all()
+    if not items:
+        flash("Nessun articolo valido per la stampa.", "warning")
+        return redirect(request.referrer or url_for("admin_items"))
+
+    assignments = (db.session.query(Assignment.item_id, Cabinet.name, Slot.col_code, Slot.row_num)
+                   .join(Slot, Assignment.slot_id == Slot.id)
+                   .join(Cabinet, Slot.cabinet_id == Cabinet.id)
+                   .filter(Assignment.item_id.in_(ids))
+                   .all())
+    pos_by_item = {a.item_id: (a.name, a.col_code, a.row_num) for a in assignments}
+
+    page_size = portrait(A4)
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=page_size)
+    page_w, page_h = page_size
+
+    margin = mm_to_pt(12)
+    gap = mm_to_pt(6)
+    cols = 2
+    card_w = (page_w - (2 * margin) - gap) / cols
+    card_h = mm_to_pt(80)
+    rows = max(1, int((page_h - 2 * margin + gap) // (card_h + gap)))
+    padding = mm_to_pt(5)
+
+    def _fmt_mm(v):
+        if v is None:
+            return None
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return None
+        if abs(v - round(v)) < 0.01:
+            return str(int(round(v)))
+        return f"{v:.1f}".rstrip("0").rstrip(".")
+
+    for idx, item in enumerate(items):
+        col = idx % cols
+        row = (idx // cols) % rows
+        if idx > 0 and idx % (cols * rows) == 0:
+            c.showPage()
+        x = margin + col * (card_w + gap)
+        y = page_h - margin - card_h - row * (card_h + gap)
+
+        c.setStrokeGray(0.8)
+        c.setLineWidth(0.7)
+        c.rect(x, y, card_w, card_h, stroke=1, fill=0)
+        cy = y + card_h - padding
+        c.setFillColor(HexColor(item.category.color if item.category else "#000000"))
+        c.rect(x, y + card_h - 3, card_w, 3, fill=1, stroke=0)
+        c.setFillColorRGB(0, 0, 0)
+
+        title_lines = wrap_to_lines(auto_name_for(item), "Helvetica-Bold", 12, card_w - 2 * padding, max_lines=2)
+        c.setFont("Helvetica-Bold", 12)
+        for ln in title_lines:
+            cy -= 12
+            c.drawString(x + padding, cy, ln)
+            cy -= 2
+
+        meta_parts = []
+        if item.category:
+            meta_parts.append(item.category.name)
+        if item.subtype:
+            meta_parts.append(item.subtype.name)
+        if item.thread_size:
+            meta_parts.append(item.thread_size)
+        meta_text = " · ".join(meta_parts)
+        if meta_text:
+            c.setFont("Helvetica", 10)
+            cy -= 10
+            c.drawString(x + padding, cy, meta_text)
+            cy -= 6
+
+        details = []
+        dim = _fmt_mm(item.outer_d_mm if not (is_screw(item) or is_standoff(item) or is_spacer(item)) else item.length_mm)
+        if dim:
+            prefix = "L" if (is_screw(item) or is_standoff(item) or is_spacer(item)) else "Øe"
+            details.append(f"{prefix}: {dim} mm")
+        if item.inner_d_mm:
+            details.append(f"Øi: {_fmt_mm(item.inner_d_mm)} mm")
+        thickness_val = unified_thickness_value(item)
+        if thickness_val:
+            details.append(f"Spessore: {_fmt_mm(thickness_val)} mm")
+        if item.material:
+            details.append(f"Materiale: {item.material.name}")
+        if item.finish:
+            details.append(f"Finitura: {item.finish.name}")
+        if details:
+            c.setFont("Helvetica", 9.5)
+            for det in details:
+                cy -= 11
+                c.drawString(x + padding, cy, det)
+            cy -= 4
+
+        if item.description:
+            desc_lines = wrap_to_lines(item.description, "Helvetica-Oblique", 9, card_w - 2 * padding, max_lines=3)
+            if desc_lines:
+                c.setFont("Helvetica-Oblique", 9)
+                for ln in desc_lines:
+                    cy -= 11
+                    c.drawString(x + padding, cy, ln)
+                cy -= 2
+
+        qty_line = f"Quantità: {item.quantity}"
+        share_line = f"Condivisione cassetto: {'SI' if item.share_drawer else 'NO'}"
+        c.setFont("Helvetica-Bold", 9.5)
+        cy -= 12
+        c.drawString(x + padding, cy, qty_line)
+        cy -= 11
+        c.drawString(x + padding, cy, share_line)
+
+        pos_data = pos_by_item.get(item.id)
+        if pos_data:
+            cab, col_code, row_num = pos_data
+            cy -= 12
+            c.drawString(x + padding, cy, f"Posizione: {cab} {col_code}{row_num}")
+
+    c.save()
+    buf.seek(0)
+    return send_file(buf, as_attachment=True, download_name="cartellini.pdf", mimetype="application/pdf")
 # ===================== INIT / SEED =====================
 
 def seed_if_empty_or_missing():
     ensure_settings_columns()
+    ensure_item_columns()
     if not User.query.filter_by(username="admin").first():
         db.session.add(User(username="admin", password="admin"))
     if not Settings.query.get(1):
