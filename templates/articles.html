@@ -1,5 +1,18 @@
 {% extends "base.html" %}
 {% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+  <div>
+    <h3 class="mb-1">Articoli</h3>
+    <div class="text-muted small">Un'unica griglia per consultare e gestire il catalogo; accedi per modificare o aggiungere.</div>
+  </div>
+  {% if is_admin %}
+    <div class="d-flex flex-wrap gap-2">
+      <a href="#newItemForm" class="btn btn-primary btn-sm">Nuovo articolo</a>
+      <a href="{{ url_for('export_items_csv') }}" class="btn btn-outline-dark btn-sm">Esporta CSV</a>
+    </div>
+  {% endif %}
+</div>
+
 <div class="row g-3 mb-3">
   <div class="col-lg-3 col-md-6">
     <div class="kpi-card h-100">
@@ -31,21 +44,8 @@
   </div>
 </div>
 
-<div class="action-bar mb-3">
-  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
-    <div>
-      <h3 class="mb-1">Articoli (Admin)</h3>
-      <div class="text-muted small">Gestisci catalogo e stampa etichette in modo rapido.</div>
-    </div>
-    <div class="d-flex flex-wrap gap-2">
-      <a href="{{ url_for('placements') }}" class="btn btn-outline-primary btn-sm">Posizionamento</a>
-      <a href="{{ url_for('export_items_csv') }}" class="btn btn-outline-dark btn-sm">Esporta CSV</a>
-      <a href="#admItemsTable" class="btn btn-primary btn-sm">Vai alla tabella</a>
-    </div>
-  </div>
-</div>
-
-<div class="form-section mb-3">
+{% if is_admin %}
+<div class="form-section mb-3" id="newItemForm">
   <h5 class="mb-2">Nuovo articolo</h5>
   <form method="post" action="{{ url_for('add_item') }}" class="needs-validation" novalidate>
     <div class="row g-2">
@@ -206,16 +206,23 @@
     </div>
   </form>
 </div>
+{% endif %}
 
-<div class="form-section mb-3">
-  <h5 class="mb-3">Elenco</h5>
-  <form id="itemFilter" method="get" action="{{ url_for('admin_items') }}" class="row g-2 align-items-end mb-3">
-    <div class="col-12">
-      <div class="text-uppercase text-muted small fw-semibold">Filtro</div>
-    </div>
+<div class="form-section">
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+    <h5 class="mb-0">Griglia articoli</h5>
+    {% if is_admin %}
+      <div class="d-flex flex-wrap gap-2">
+        <button class="btn btn-sm btn-primary" type="submit" form="labelForm" formaction="{{ url_for('labels_pdf') }}">Stampa etichette</button>
+        <button class="btn btn-sm btn-outline-primary" type="submit" form="labelForm" formaction="{{ url_for('cards_pdf') }}">Stampa cartellini</button>
+      </div>
+    {% endif %}
+  </div>
+
+  <form id="itemFilter" method="get" action="{{ url_for('articles') }}" class="row g-2 align-items-end mb-3">
     <div class="col-md-3">
-      <label class="form-label small text-muted mb-1">Testo</label>
-      <input type="text" name="q" class="form-control" placeholder="Nome o descrizione" value="{{ request.args.get('q','') }}">
+      <label class="form-label small text-muted mb-1">Ricerca</label>
+      <input type="text" name="q" class="form-control" placeholder="Nome, descrizione o filettatura" value="{{ request.args.get('q','') }}">
     </div>
     <div class="col-md-2">
       <label class="form-label small text-muted mb-1">Categoria</label>
@@ -246,7 +253,7 @@
     </div>
     <div class="col-md-2">
       <label class="form-label small text-muted mb-1">Misura</label>
-      <input type="text" name="thread_size" class="form-control" placeholder="es. M3" value="{{ request.args.get('thread_size','') }}">
+      <input type="text" name="measure" class="form-control" placeholder="es. M3" value="{{ measure_q }}">
     </div>
     <div class="col-md-2">
       <label class="form-label small text-muted mb-1">Condivisione</label>
@@ -273,26 +280,25 @@
       <label class="form-label small text-muted mb-1">Riga</label>
       <input type="number" min="1" max="128" name="pos_row" class="form-control" placeholder="1..128" value="{{ request.args.get('pos_row','') }}">
     </div>
-    <div class="col-md-3 d-flex gap-2">
+    <div class="col-md-3 d-flex flex-wrap gap-2">
       <button class="btn btn-outline-primary btn-sm flex-grow-1">Filtra</button>
-      <a href="{{ url_for('admin_items') }}" class="btn btn-outline-secondary btn-sm">Reset</a>
+      <a href="{{ url_for('articles') }}" class="btn btn-outline-secondary btn-sm">Reset</a>
+    </div>
+    <div class="col-12 d-flex flex-wrap gap-2">
+      <a class="btn btn-outline-dark btn-sm {{ 'active' if stock_filter == 'available' else '' }}" href="{{ url_for('articles', stock='available', q=request.args.get('q'), category_id=request.args.get('category_id'), material_id=request.args.get('material_id'), finish_id=request.args.get('finish_id'), measure=request.args.get('measure'), pos_cabinet_id=request.args.get('pos_cabinet_id'), pos_col=request.args.get('pos_col'), pos_row=request.args.get('pos_row'), share_drawer=request.args.get('share_drawer')) }}">Disponibili</a>
+      <a class="btn btn-outline-warning btn-sm {{ 'active' if stock_filter == 'low' else '' }}" href="{{ url_for('articles', stock='low', q=request.args.get('q'), category_id=request.args.get('category_id'), material_id=request.args.get('material_id'), finish_id=request.args.get('finish_id'), measure=request.args.get('measure'), pos_cabinet_id=request.args.get('pos_cabinet_id'), pos_col=request.args.get('pos_col'), pos_row=request.args.get('pos_row'), share_drawer=request.args.get('share_drawer')) }}">Scorte basse</a>
+      <a class="btn btn-outline-danger btn-sm {{ 'active' if stock_filter == 'out' else '' }}" href="{{ url_for('articles', stock='out', q=request.args.get('q'), category_id=request.args.get('category_id'), material_id=request.args.get('material_id'), finish_id=request.args.get('finish_id'), measure=request.args.get('measure'), pos_cabinet_id=request.args.get('pos_cabinet_id'), pos_col=request.args.get('pos_col'), pos_row=request.args.get('pos_row'), share_drawer=request.args.get('share_drawer')) }}">Esauriti</a>
     </div>
   </form>
+
+  {% if is_admin %}
   <form id="labelForm" method="post" action="{{ url_for('labels_pdf') }}">
-    <div class="d-flex justify-content-between align-items-center mb-2">
-      <div class="text-end">
-        <div class="d-flex gap-2 justify-content-end">
-          <button class="btn btn-sm btn-primary" type="submit" formaction="{{ url_for('labels_pdf') }}">Stampa etichette</button>
-          <button class="btn btn-sm btn-outline-primary" type="submit" formaction="{{ url_for('cards_pdf') }}">Stampa Cartellini</button>
-        </div>
-        <div class="form-text">Se non selezioni nulla, verranno stampati tutti gli articoli.</div>
-      </div>
-    </div>
+  {% endif %}
     <div class="table-responsive table-sticky">
-      <table class="table table-striped table-hover align-middle mb-0" id="admItemsTable">
+      <table class="table table-striped table-hover align-middle mb-0" id="articlesTable">
         <thead>
           <tr>
-            <th style="width:36px;"><input type="checkbox" id="chkAll"></th>
+            {% if is_admin %}<th style="width:36px;"><input type="checkbox" id="chkAll"></th>{% endif %}
             <th>ID</th>
             <th>Categoria</th>
             <th>Nome</th>
@@ -302,14 +308,14 @@
             <th>Materiale</th>
             <th>Q.ta</th>
             <th>Posizione</th>
-            <th>Condiviso</th>
-            <th>Azione</th>
+            {% if is_admin %}<th>Condiviso</th>
+            <th>Azione</th>{% endif %}
           </tr>
         </thead>
         <tbody>
           {% for it in items %}
-          <tr data-edit-url="{{ url_for('edit_item', item_id=it.id) }}">
-            <td><input type="checkbox" name="item_ids" value="{{ it.id }}"></td>
+          <tr {% if is_admin %}data-edit-url="{{ url_for('edit_item', item_id=it.id) }}"{% endif %}>
+            {% if is_admin %}<td><input type="checkbox" name="item_ids" value="{{ it.id }}"></td>{% endif %}
             <td>{{ it.id }}</td>
             <td>{% if it.category %}<span class="badge-color" style="background:{{ it.category.color }}"></span>{{ it.category.name }}{% endif %}</td>
             <td>{{ compose_caption(it) }}</td>
@@ -328,6 +334,7 @@
               <span class="ms-2 fw-semibold">{{ it.quantity }}</span>
             </td>
             <td>{{ pos_by_item.get(it.id, '') }}</td>
+            {% if is_admin %}
             <td class="text-center">{% if it.share_drawer %}&#10003;{% endif %}</td>
             <td class="text-nowrap">
               <a href="{{ url_for('edit_item', item_id=it.id) }}" class="btn btn-sm btn-outline-primary">Modifica</a>
@@ -335,12 +342,15 @@
                 <button class="btn btn-sm btn-outline-danger">Elimina</button>
               </form>
             </td>
+            {% endif %}
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
+  {% if is_admin %}
   </form>
+  {% endif %}
 </div>
 
 <script>
@@ -349,7 +359,8 @@ const CATEGORY_FIELDS = {{ category_fields|tojson }};
 
 function populateSubtypes(catId, targetSelId){
   const sel = document.getElementById(targetSelId);
-  sel.innerHTML = '<option value="">—</option>';
+  if (!sel) return;
+  sel.innerHTML = '<option value=\"\">—</option>';
   if (!catId || !SUBTYPES[catId]) return;
   SUBTYPES[catId].forEach(s=>{
     const o = document.createElement('option');
@@ -377,8 +388,10 @@ function applyFieldVisibility(catId){
   });
 }
 function switchDatalist(stdSelId, inputId){
-  const std = document.getElementById(stdSelId).value;
+  const stdEl = document.getElementById(stdSelId);
   const inp = document.getElementById(inputId);
+  if (!stdEl || !inp) return;
+  const std = stdEl.value;
   if (!std) {
     inp.removeAttribute('list');
     return;
@@ -405,22 +418,26 @@ function clearKeepParams(){
 }
 
 document.addEventListener('DOMContentLoaded', ()=>{
-  const tableSelector = '#admItemsTable';
+  const tableSelector = '#articlesTable';
   const excludedSelectors = 'a, button, input, label, select';
+  const defaultOrder = {{ '[[1,\"asc\"]]' if is_admin else '[[0,\"asc\"]]' }};
   if ($.fn.DataTable) {
-    const dt = $(tableSelector).DataTable({
+    $(tableSelector).DataTable({
       pageLength:25,
       lengthMenu:[10, 25, 50, 100],
-      order:[[1,'asc']],
+      order: defaultOrder,
       language: { search: "Cerca nella tabella:" }
     });
+    {% if is_admin %}
     $(`${tableSelector} tbody`).on('click', 'tr', function(e){
       if ($(e.target).closest(excludedSelectors).length) return;
       const url = this.dataset.editUrl;
       if (url) window.location.href = url;
     });
     $(`${tableSelector} tbody tr`).addClass('cursor-pointer');
+    {% endif %}
   } else {
+    {% if is_admin %}
     document.querySelectorAll(`${tableSelector} tbody tr`).forEach(row=>{
       row.classList.add('cursor-pointer');
       row.addEventListener('click', (e)=>{
@@ -429,9 +446,11 @@ document.addEventListener('DOMContentLoaded', ()=>{
         if (url) window.location.href = url;
       });
     });
+    {% endif %}
   }
+  {% if is_admin %}
   document.getElementById('chkAll')?.addEventListener('change', (e)=>{
-    document.querySelectorAll('input[name="item_ids"]').forEach(cb=> cb.checked = e.target.checked);
+    document.querySelectorAll('input[name=\"item_ids\"]').forEach(cb=> cb.checked = e.target.checked);
   });
   const catSel = document.getElementById('catSel');
   const initialCat = parseInt(catSel?.value || 0);
@@ -444,11 +463,9 @@ document.addEventListener('DOMContentLoaded', ()=>{
     populateSubtypes(catId, 'subtypeSel');
     applyFieldVisibility(catId);
   });
-  document.getElementById('stdSel').addEventListener('change', ()=>switchDatalist('stdSel','sizeInput'));
+  document.getElementById('stdSel')?.addEventListener('change', ()=>switchDatalist('stdSel','sizeInput'));
   clearKeepParams();
 
-  // Se arrivo qui da "Nuovo articolo…" sulla griglia,
-  // precompilo i campi posizione nel form "Nuovo articolo"
   try {
     const params = new URLSearchParams(window.location.search);
     const cab = params.get('new_for_cab');
@@ -458,9 +475,9 @@ document.addEventListener('DOMContentLoaded', ()=>{
     if (cab && col && row) {
       const formNew = document.querySelector('form[action="{{ url_for("add_item") }}"]');
       if (formNew) {
-        const cabSel = formNew.querySelector('select[name="cabinet_id"]');
-        const colInp = formNew.querySelector('input[name="col_code"]');
-        const rowInp = formNew.querySelector('input[name="row_num"]');
+        const cabSel = formNew.querySelector('select[name=\"cabinet_id\"]');
+        const colInp = formNew.querySelector('input[name=\"col_code\"]');
+        const rowInp = formNew.querySelector('input[name=\"row_num\"]');
         if (cabSel) cabSel.value = cab;
         if (colInp) colInp.value = col;
         if (rowInp) rowInp.value = row;
@@ -468,8 +485,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
       }
     }
   } catch (e) {
-    // in caso di browser vecchi senza URLSearchParams, ignoro l'errore
   }
+  {% endif %}
 });
 
 </script>
