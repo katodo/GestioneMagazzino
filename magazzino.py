@@ -923,28 +923,51 @@ def logout():
     logout_user(); return redirect(url_for("index"))
 
 # ===================== PUBLIC =====================
-@app.route("/")
-def index():
+def _render_articles_page():
     low_stock_threshold = 5
-    q = Item.query.options(
+    items_q    = Item.query.options(
         selectinload(Item.category),
         selectinload(Item.material),
         selectinload(Item.finish),
         selectinload(Item.subtype),
     )
-    if request.args.get("category_id"): q = q.filter(Item.category_id == request.args.get("category_id"))
-    if request.args.get("material_id"): q = q.filter(Item.material_id == request.args.get("material_id"))
-    if request.args.get("measure"):      q = q.filter(func.lower(Item.thread_size).contains(request.args.get("measure").lower()))
-    if request.args.get("q"):
-        term = request.args.get("q").lower()
-        q = q.filter(or_(
-            func.lower(Item.name).contains(term),
-            func.lower(Item.description).contains(term),
-            func.lower(Item.thread_size).contains(term),
-        ))
+    text_q = (request.args.get("q") or "").strip()
+    category_id = request.args.get("category_id", type=int)
+    material_id = request.args.get("material_id", type=int)
+    finish_id = request.args.get("finish_id", type=int)
+    measure_q = (request.args.get("measure") or request.args.get("thread_size") or "").strip()
+    share_filter = request.args.get("share_drawer")
+    stock_filter = request.args.get("stock")
     pos_cabinet_id = request.args.get("pos_cabinet_id", type=int)
     pos_col = (request.args.get("pos_col") or "").strip().upper()
     pos_row = request.args.get("pos_row", type=int)
+
+    if text_q:
+        text_q_lower = text_q.lower()
+        items_q = items_q.filter(or_(
+            func.lower(Item.name).contains(text_q_lower),
+            func.lower(Item.description).contains(text_q_lower),
+            func.lower(Item.thread_size).contains(text_q_lower),
+        ))
+    if category_id:
+        items_q = items_q.filter(Item.category_id == category_id)
+    if material_id:
+        items_q = items_q.filter(Item.material_id == material_id)
+    if finish_id:
+        items_q = items_q.filter(Item.finish_id == finish_id)
+    if measure_q:
+        items_q = items_q.filter(func.lower(Item.thread_size).contains(measure_q.lower()))
+    if share_filter == "1":
+        items_q = items_q.filter(Item.share_drawer.is_(True))
+    elif share_filter == "0":
+        items_q = items_q.filter(Item.share_drawer.is_(False))
+    if stock_filter == "available":
+        items_q = items_q.filter(Item.quantity > 0)
+    elif stock_filter == "low":
+        items_q = items_q.filter(Item.quantity <= low_stock_threshold)
+    elif stock_filter == "out":
+        items_q = items_q.filter(Item.quantity <= 0)
+
     if pos_cabinet_id or pos_col or pos_row:
         pos_q = db.session.query(Assignment.item_id).join(Slot, Assignment.slot_id == Slot.id)
         if pos_cabinet_id:
@@ -953,18 +976,15 @@ def index():
             pos_q = pos_q.filter(Slot.col_code == pos_col)
         if pos_row:
             pos_q = pos_q.filter(Slot.row_num == pos_row)
-        q = q.filter(Item.id.in_(pos_q))
-    stock = request.args.get("stock")
-    if stock == "available":
-        q = q.filter(Item.quantity > 0)
-    elif stock == "low":
-        q = q.filter(Item.quantity <= low_stock_threshold)
-    elif stock == "out":
-        q = q.filter(Item.quantity <= 0)
-    items = q.all()
+        items_q = items_q.filter(Item.id.in_(pos_q))
+    items = items_q.all()
 
     categories = Category.query.order_by(Category.name).all()
+    subtypes   = Subtype.query.order_by(Subtype.name).all()
     materials  = Material.query.order_by(Material.name).all()
+    finishes   = Finish.query.order_by(Finish.name).all()
+    locations  = Location.query.order_by(Location.name).all()
+    cabinets   = Cabinet.query.order_by(Cabinet.name).all()
 
     assignments = (
         db.session.query(Assignment.item_id, Cabinet.name, Slot.col_code, Slot.row_num)
@@ -974,30 +994,53 @@ def index():
     )
     pos_by_item = {a.item_id: make_full_position(a.name, a.col_code, a.row_num) for a in assignments}
 
-    cab_id = request.args.get("cabinet_id", type=int)
-    all_cabinets = Cabinet.query.order_by(Cabinet.name).all()
-    if not cab_id and all_cabinets: cab_id = all_cabinets[0].id
-    grid = build_full_grid(cab_id) if cab_id else {"rows":[], "cols":[], "cells":{}, "cab":None}
+    thread_standards, sizes_by_standard = load_form_options()
+    default_standard_code = next(
+        (s.code for s in thread_standards if s.code == "M"),
+        thread_standards[0].code if thread_standards else "",
+    )
+
+    subtypes_by_cat = {}
+    for s in subtypes:
+        subtypes_by_cat.setdefault(s.category_id, []).append({"id": s.id, "name": s.name})
+
+    custom_fields = CustomField.query.filter_by(is_active=True).order_by(CustomField.sort_order, CustomField.name).all()
+    serialized_custom_fields = serialize_custom_fields(custom_fields)
+    category_fields = build_category_field_map(categories)
 
     subq = select(Assignment.item_id)
-    unplaced = Item.query.filter(Item.id.not_in(subq)).all()
-    unplaced_json = [
-        {"id": it.id, "caption": auto_name_for(it), "category_id": it.category_id}
-        for it in unplaced
-    ]
-
+    unplaced_count = Item.query.filter(Item.id.not_in(subq)).count()
+    low_stock_count = Item.query.filter(Item.quantity <= low_stock_threshold).count()
     total_items = Item.query.count()
     total_categories = Category.query.count()
-    low_stock_count = Item.query.filter(Item.quantity <= low_stock_threshold).count()
 
-    return render_template("index.html",
-        items=items, categories=categories, materials=materials, pos_by_item=pos_by_item,
-        cabinets=all_cabinets, selected_cab_id=cab_id, grid=grid,
-        unplaced_json=unplaced_json, is_admin=current_user.is_authenticated,
-        total_items=total_items, total_categories=total_categories,
-        low_stock_count=low_stock_count, unplaced_count=len(unplaced),
-        low_stock_threshold=low_stock_threshold
+    return render_template("articles.html",
+        items=items, categories=categories, materials=materials, finishes=finishes,
+        locations=locations, cabinets=cabinets,
+        subtypes_by_cat=subtypes_by_cat,
+        thread_standards=thread_standards,
+        sizes_by_standard=sizes_by_standard,
+        default_standard_code=default_standard_code,
+        pos_by_item=pos_by_item,
+        custom_fields=serialized_custom_fields,
+        category_fields=category_fields,
+        unplaced_count=unplaced_count,
+        low_stock_count=low_stock_count,
+        total_items=total_items,
+        total_categories=total_categories,
+        low_stock_threshold=low_stock_threshold,
+        is_admin=current_user.is_authenticated,
+        stock_filter=stock_filter,
+        measure_q=measure_q,
     )
+
+@app.route("/")
+def index():
+    return _render_articles_page()
+
+@app.route("/articoli")
+def articles():
+    return _render_articles_page()
 
 def build_full_grid(cabinet_id:int):
     cab = db.session.get(Cabinet, cabinet_id)
@@ -1097,6 +1140,34 @@ def build_full_grid(cabinet_id:int):
         "merge_skips": merge_skips,
     }
 
+@app.route("/cassettiere")
+def cassettiere():
+    cab_id = request.args.get("cabinet_id", type=int)
+    cabinets = Cabinet.query.order_by(Cabinet.name).all()
+    if not cab_id and cabinets:
+        cab_id = cabinets[0].id
+    grid = build_full_grid(cab_id) if cab_id else {"rows": [], "cols": [], "cells": {}, "cab": None}
+
+    categories = Category.query.order_by(Category.name).all()
+    subq = select(Assignment.item_id)
+    unplaced_json = []
+    if current_user.is_authenticated:
+        unplaced = Item.query.filter(Item.id.not_in(subq)).all()
+        unplaced_json = [
+            {"id": it.id, "caption": auto_name_for(it), "category_id": it.category_id}
+            for it in unplaced
+        ]
+
+    return render_template(
+        "cassettiere.html",
+        categories=categories,
+        cabinets=cabinets,
+        selected_cab_id=cab_id,
+        grid=grid,
+        unplaced_json=unplaced_json,
+        is_admin=current_user.is_authenticated,
+    )
+
 def short_cell_text(item: Item) -> str:
     lines = label_lines_for_item(item)
     return "\n".join(lines[:2])
@@ -1186,103 +1257,7 @@ def api_slot_lookup():
 @app.route("/admin")
 @login_required
 def admin_items():
-    items_q    = Item.query.options(
-        selectinload(Item.category),
-        selectinload(Item.material),
-        selectinload(Item.finish),
-        selectinload(Item.subtype),
-    )
-    text_q = (request.args.get("q") or "").strip()
-    category_id = request.args.get("category_id", type=int)
-    material_id = request.args.get("material_id", type=int)
-    finish_id = request.args.get("finish_id", type=int)
-    thread_size_q = (request.args.get("thread_size") or "").strip()
-    share_filter = request.args.get("share_drawer")
-    pos_cabinet_id = request.args.get("pos_cabinet_id", type=int)
-    pos_col = (request.args.get("pos_col") or "").strip().upper()
-    pos_row = request.args.get("pos_row", type=int)
-
-    if text_q:
-        text_q_lower = text_q.lower()
-        items_q = items_q.filter(or_(
-            func.lower(Item.name).contains(text_q_lower),
-            func.lower(Item.description).contains(text_q_lower),
-        ))
-    if category_id:
-        items_q = items_q.filter(Item.category_id == category_id)
-    if material_id:
-        items_q = items_q.filter(Item.material_id == material_id)
-    if finish_id:
-        items_q = items_q.filter(Item.finish_id == finish_id)
-    if thread_size_q:
-        items_q = items_q.filter(func.lower(Item.thread_size).contains(thread_size_q.lower()))
-    if share_filter == "1":
-        items_q = items_q.filter(Item.share_drawer.is_(True))
-    elif share_filter == "0":
-        items_q = items_q.filter(Item.share_drawer.is_(False))
-
-    if pos_cabinet_id or pos_col or pos_row:
-        pos_q = db.session.query(Assignment.item_id).join(Slot, Assignment.slot_id == Slot.id)
-        if pos_cabinet_id:
-            pos_q = pos_q.filter(Slot.cabinet_id == pos_cabinet_id)
-        if pos_col:
-            pos_q = pos_q.filter(Slot.col_code == pos_col)
-        if pos_row:
-            pos_q = pos_q.filter(Slot.row_num == pos_row)
-        items_q = items_q.filter(Item.id.in_(pos_q))
-    items = items_q.all()
-    categories = Category.query.order_by(Category.name).all()
-    subtypes   = Subtype.query.order_by(Subtype.name).all()
-    materials  = Material.query.order_by(Material.name).all()
-    finishes   = Finish.query.order_by(Finish.name).all()
-    locations  = Location.query.order_by(Location.name).all()
-    cabinets   = Cabinet.query.order_by(Cabinet.name).all()
-
-    assignments = (
-        db.session.query(Assignment.item_id, Cabinet.name, Slot.col_code, Slot.row_num)
-        .join(Slot, Assignment.slot_id == Slot.id)
-        .join(Cabinet, Slot.cabinet_id == Cabinet.id)
-        .all()
-    )
-    pos_by_item = {a.item_id: make_full_position(a.name, a.col_code, a.row_num) for a in assignments}
-
-    thread_standards, sizes_by_standard = load_form_options()
-    default_standard_code = next(
-        (s.code for s in thread_standards if s.code == "M"),
-        thread_standards[0].code if thread_standards else "",
-    )
-
-    subtypes_by_cat = {}
-    for s in subtypes:
-        subtypes_by_cat.setdefault(s.category_id, []).append({"id": s.id, "name": s.name})
-
-    custom_fields = CustomField.query.filter_by(is_active=True).order_by(CustomField.sort_order, CustomField.name).all()
-    serialized_custom_fields = serialize_custom_fields(custom_fields)
-    category_fields = build_category_field_map(categories)
-
-    subq = select(Assignment.item_id)
-    unplaced_count = Item.query.filter(Item.id.not_in(subq)).count()
-    low_stock_threshold = 5
-    low_stock_count = Item.query.filter(Item.quantity <= low_stock_threshold).count()
-    total_items = Item.query.count()
-    total_categories = Category.query.count()
-
-    return render_template("admin/dashboard.html",
-        items=items, categories=categories, materials=materials, finishes=finishes,
-        locations=locations, cabinets=cabinets,
-        subtypes_by_cat=subtypes_by_cat,
-        thread_standards=thread_standards,
-        sizes_by_standard=sizes_by_standard,
-        default_standard_code=default_standard_code,
-        pos_by_item=pos_by_item,
-        custom_fields=serialized_custom_fields,
-        category_fields=category_fields,
-        unplaced_count=unplaced_count,
-        low_stock_count=low_stock_count,
-        total_items=total_items,
-        total_categories=total_categories,
-        low_stock_threshold=low_stock_threshold
-    )
+    return _render_articles_page()
 
 @app.route("/admin/items/export")
 @login_required
@@ -1345,10 +1320,7 @@ def export_items_csv():
 @app.route("/admin/to_place")
 @login_required
 def to_place():
-    subq = select(Assignment.item_id)
-    items = Item.query.filter(Item.id.not_in(subq)).all()
-    cabinets = Cabinet.query.order_by(Cabinet.name).all()
-    return render_template("admin/to_place.html", items=items, cabinets=cabinets)
+    return redirect(url_for("placements"))
 
 @app.route("/admin/items/add", methods=["POST"])
 @login_required
@@ -2596,9 +2568,7 @@ def _deallocate_category_from_cabinet(category_id: int, cabinet_id: int):
     }
 
 
-@app.route("/admin/auto_assign", methods=["GET", "POST"])
-@login_required
-def auto_assign():
+def _placements_internal():
     cabinets = Cabinet.query.order_by(Cabinet.name).all()
     categories = Category.query.order_by(Category.name).all()
     sort_options = [
@@ -2623,6 +2593,8 @@ def auto_assign():
     if not form_cabinet_id and cabinets:
         form_cabinet_id = cabinets[0].id
 
+    target_endpoint = "placements"
+
     if request.method == "POST":
         form = request.form
         action = form.get("action") or "auto_assign"
@@ -2631,7 +2603,7 @@ def auto_assign():
             form_category_id = int(form.get("category_id") or 0)
         except Exception:
             flash("Parametri non validi per l'assegnamento automatico.", "danger")
-            return redirect(url_for("auto_assign"))
+            return redirect(url_for(target_endpoint))
 
         primary_key    = form.get("primary_key") or primary_key or "length_mm"
         secondary_key  = form.get("secondary_key") or ""
@@ -2670,7 +2642,7 @@ def auto_assign():
                     flash(f"Errore durante la de-allocazione: {e}", "danger")
 
             return redirect(url_for(
-                "auto_assign",
+                target_endpoint,
                 cabinet_id=form_cabinet_id or "",
                 category_id=form_category_id or "",
                 primary_key=primary_key,
@@ -2685,7 +2657,7 @@ def auto_assign():
         if not (form_cabinet_id and form_category_id and start_col and start_row):
             flash("Seleziona cassettiera, categoria e cella di partenza.", "danger")
             return redirect(url_for(
-                "auto_assign",
+                target_endpoint,
                 cabinet_id=form_cabinet_id or "",
                 category_id=form_category_id or "",
                 primary_key=primary_key,
@@ -2733,7 +2705,7 @@ def auto_assign():
             flash(f"Errore nell'assegnamento automatico: {e}", "danger")
 
         return redirect(url_for(
-            "auto_assign",
+            target_endpoint,
             cabinet_id=form_cabinet_id,
             category_id=form_category_id,
             primary_key=primary_key,
@@ -2758,9 +2730,10 @@ def auto_assign():
     unplaced_count = None
     if form_category_id:
         unplaced_count = unplaced_by_category.get(form_category_id, 0)
+    items_to_place = Item.query.filter(Item.id.not_in(subq)).all()
 
     return render_template(
-        "admin/auto_assign.html",
+        "admin/placements.html",
         cabinets=cabinets,
         categories=categories,
         sort_options=sort_options,
@@ -2776,7 +2749,18 @@ def auto_assign():
         clear_occupied=clear_occupied,
         unplaced_count=unplaced_count,
         unplaced_by_category=unplaced_by_category,
+        items_to_place=items_to_place,
     )
+
+@app.route("/admin/posizionamento", methods=["GET", "POST"])
+@login_required
+def placements():
+    return _placements_internal()
+
+@app.route("/admin/auto_assign", methods=["GET", "POST"])
+@login_required
+def auto_assign():
+    return _placements_internal()
 
 
 # ===================== ETICHETTE PDF =====================

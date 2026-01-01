@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
-<h3>Assegnamento automatico cassettiera</h3>
+<h3>Posizionamento articoli</h3>
 
 <div class="form-section mb-3">
-  <form method="post" id="autoAssignForm">
+  <form method="post" id="autoAssignForm" action="{{ url_for('placements') }}">
     <input type="hidden" name="action" id="formAction" value="auto_assign">
     <div class="row g-2">
       <div class="col-md-3">
@@ -141,6 +141,32 @@
   {% endif %}
 </div>
 
+<div class="form-section mt-3">
+  <div class="d-flex align-items-center justify-content-between mb-2 flex-wrap gap-2">
+    <h5 class="mb-0">Articoli da posizionare</h5>
+    <a href="{{ url_for('cassettiere') }}" class="btn btn-outline-secondary btn-sm">Vai alla griglia</a>
+  </div>
+  <div class="table-responsive table-sticky">
+    <table class="table table-striped align-middle mb-0" id="tbl">
+      <thead><tr><th>ID</th><th>Categoria</th><th>Descrizione</th><th>Misura</th><th>Azioni</th></tr></thead>
+      <tbody>
+        {% for it in items_to_place %}
+        <tr>
+          <td>{{ it.id }}</td>
+          <td>{% if it.category %}<span class="badge-color" style="background:{{ it.category.color }}"></span>{{ it.category.name }}{% endif %}</td>
+          <td>{{ compose_caption(it) }}</td>
+          <td>{{ it.thread_size or '' }}</td>
+          <td class="text-nowrap">
+            <a href="{{ url_for('edit_item', item_id=it.id) }}" class="btn btn-sm btn-outline-primary">Modifica</a>
+            <a href="{{ url_for('cassettiere') }}" class="btn btn-sm btn-outline-secondary">Apri griglia</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
 <script>
 document.addEventListener('DOMContentLoaded', function(){
   function escapeHtml(str){
@@ -199,23 +225,24 @@ document.addEventListener('DOMContentLoaded', function(){
     });
   }
   const grid = document.getElementById('autoGrid');
-  if (!grid) return;
-  initCellPopovers('autoGrid');
-  grid.addEventListener('click', function(e){
-    const td = e.target.closest('td');
-    if (!td) return;
-    if (td.classList.contains('cell-blocked')) {
-      alert('Cella bloccata, non utilizzabile.');
-      return;
-    }
-    const col = td.dataset.col;
-    const row = td.dataset.row;
-    if (!col || !row) return;
-    document.getElementById('start_col').value = col;
-    document.getElementById('start_row').value = row;
-    grid.querySelectorAll('td').forEach(c => c.classList.remove('table-primary'));
-    td.classList.add('table-primary');
-  });
+  if (grid) {
+    initCellPopovers('autoGrid');
+    grid.addEventListener('click', function(e){
+      const td = e.target.closest('td');
+      if (!td) return;
+      if (td.classList.contains('cell-blocked')) {
+        alert('Cella bloccata, non utilizzabile.');
+        return;
+      }
+      const col = td.dataset.col;
+      const row = td.dataset.row;
+      if (!col || !row) return;
+      document.getElementById('start_col').value = col;
+      document.getElementById('start_row').value = row;
+      grid.querySelectorAll('td').forEach(c => c.classList.remove('table-primary'));
+      td.classList.add('table-primary');
+    });
+  }
 
   const clearBtn = document.getElementById('clearCategoryBtn');
   if (clearBtn) {
@@ -229,6 +256,15 @@ document.addEventListener('DOMContentLoaded', function(){
       if (!secondConfirm) return;
       document.getElementById('formAction').value = 'clear_category';
       form.submit();
+    });
+  }
+
+  if ($.fn.DataTable) {
+    $('#tbl').DataTable({
+      pageLength:50,
+      lengthMenu:[10, 25, 50, 100],
+      order:[[1,'asc']],
+      language: { search: "Cerca nella tabella:" }
     });
   }
 });
