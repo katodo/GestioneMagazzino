@@ -2449,15 +2449,13 @@ def _auto_assign_category(category_id: int,
     total_unplaced = len(all_candidates)
 
     assignments_plan = []   # (item, col_code, row_num)
-    skipped_occupied = []   # celle saltate perché già occupate (clear_occupied=False)
-    reused_slots = set()    # celle che verranno liberate e riutilizzate (clear_occupied=True)
-    planned_usage = {}      # key -> numero di nuovi articoli pianificati nello slot
-    planned_items = {}      # key -> lista di Item (esistenti + pianificati) per compatibilità
+    skipped_occupied = set()   # celle saltate perché già occupate (clear_occupied=False)
+    reused_slots = set()       # celle che verranno liberate e riutilizzate (clear_occupied=True)
+    planned_items = {}         # key -> lista di Item (esistenti + pianificati) per compatibilità
+    slot_plan = []             # lista ordinata di slot percorsi con capacità residua e contenuto
+    max_comp = cab.compartments_per_slot or 6
 
-    idx = 0
     for col_code, row_num in _iter_cabinet_walk(cab, start_col, start_row, direction):
-        if idx >= requested:
-            break
         slot = Slot.query.filter_by(cabinet_id=cab.id, col_code=col_code, row_num=row_num).first()
         if slot and slot.is_blocked:
             continue
@@ -2474,26 +2472,60 @@ def _auto_assign_category(category_id: int,
         else:
             existing_count = len(assigns)
 
-        planned_existing = planned_usage.get(slot_key, 0)
-        max_comp = cab.compartments_per_slot or 6
-        free_here = max_comp - existing_count - planned_existing
+        free_here = max_comp - existing_count
         if free_here <= 0:
             if has_content and not clear_occupied:
-                skipped_occupied.append(slot_key)
+                skipped_occupied.add(slot_key)
             continue
 
         planned_items.setdefault(slot_key, slot_items.copy())
-        while idx < requested and free_here > 0:
-            itm = items[idx]
-            if not _can_share_slot(planned_items[slot_key], itm):
-                if has_content and not clear_occupied:
-                    skipped_occupied.append(slot_key)
-                break
-            assignments_plan.append((itm, col_code, row_num))
-            planned_items[slot_key].append(itm)
-            planned_usage[slot_key] = planned_usage.get(slot_key, 0) + 1
-            idx += 1
-            free_here -= 1
+        slot_plan.append({
+            "key": slot_key,
+            "col": col_code,
+            "row": row_num,
+            "has_content": has_content,
+            "remaining": free_here,
+        })
+
+    if not slot_plan:
+        raise ValueError("Nessuna cella disponibile per l'assegnamento automatico.")
+
+    for itm in items:
+        placed = False
+        # 1) preferisce riutilizzare cassetti già occupati e compatibili
+        for info in slot_plan:
+            if not info["has_content"]:
+                continue
+            if info["remaining"] <= 0:
+                continue
+            if not _can_share_slot(planned_items[info["key"]], itm):
+                skipped_occupied.add(info["key"])
+                continue
+            assignments_plan.append((itm, info["col"], info["row"]))
+            planned_items[info["key"]].append(itm)
+            info["remaining"] -= 1
+            placed = True
+            break
+
+        if placed:
+            continue
+
+        # 2) altrimenti usa celle vuote (o liberate)
+        for info in slot_plan:
+            if info["remaining"] <= 0:
+                continue
+            if not _can_share_slot(planned_items[info["key"]], itm):
+                if info["has_content"] and not clear_occupied:
+                    skipped_occupied.add(info["key"])
+                continue
+            assignments_plan.append((itm, info["col"], info["row"]))
+            planned_items[info["key"]].append(itm)
+            info["remaining"] -= 1
+            placed = True
+            break
+
+        if not placed:
+            break
 
     if not assignments_plan:
         if skipped_occupied and not clear_occupied:
