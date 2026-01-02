@@ -153,7 +153,7 @@
       <input type="number" min="1" max="128" class="form-control" id="row_num" name="row_num" value="{{ current_row_num }}">
     </div>
     <div class="col-md-2 d-flex align-items-end">
-      <button formaction="{{ url_for('set_position', item_id=item.id) }}" formmethod="post" class="btn btn-outline-primary w-100" formnovalidate>Imposta</button>
+      <button type="button" id="btnSetPosition" class="btn btn-outline-primary w-100" formnovalidate>Imposta</button>
     </div>
     <div class="col-md-3 d-flex align-items-end">
       <button type="button" id="btnSuggest" class="btn btn-outline-secondary w-100">Suggerisci</button>
@@ -246,6 +246,39 @@ function switchDatalist(){
     document.getElementById('cabinet_id').value = j.cabinet_id;
     document.getElementById('col_code').value  = j.col_code;
     document.getElementById('row_num').value   = j.row_num;
+  });
+  const btnSetPosition = document.getElementById('btnSetPosition');
+  btnSetPosition.addEventListener('click', async ()=>{
+    const cab = document.getElementById('cabinet_id').value;
+    const col = document.getElementById('col_code').value;
+    const row = document.getElementById('row_num').value;
+    if (!cab || !col || !row) {
+      alert('Compila cabinet, riga e colonna.');
+      return;
+    }
+    const submitPosition = async (forceShare=false) => {
+      const data = new FormData();
+      data.append('cabinet_id', cab);
+      data.append('col_code', col);
+      data.append('row_num', row);
+      if (forceShare) data.append('force_share', '1');
+      const resp = await fetch('{{ url_for("set_position_json", item_id=item.id) }}', {method:'POST', body:data});
+      const j = await resp.json();
+      if (resp.ok && j.ok) {
+        alert('Posizione aggiornata.');
+        window.location.reload();
+        return;
+      }
+      if (j.share_blockers && !forceShare) {
+        const names = j.share_blockers.map(b=>b.name).join(', ');
+        const confirmMsg = 'Il cassetto contiene articoli che non supportano la condivisione.\\nVuoi impostare \"Permetti di condividere il cassetto con altri articoli compatibili\" per tutti gli articoli coinvolti?\\nCoinvolti: ' + names;
+        if (confirm(confirmMsg)) {
+          return submitPosition(true);
+        }
+      }
+      alert(j.error || "Errore durante l'assegnamento della posizione.");
+    };
+    submitPosition();
   });
 });
 </script>
