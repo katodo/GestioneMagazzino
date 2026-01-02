@@ -315,7 +315,7 @@ function initCellPopovers(gridId){
           <div class="ms-2">
             <div class="fw-semibold">${escapeHtml(it.name || it.text || '')}</div>
             ${it.description ? `<div class="small text-muted">${escapeHtml(it.description)}</div>` : ''}
-            ${detailParts.length ? `<div class="small">${detailParts.map(escapeHtml).join(' · ')}</div>` : ''}
+            ${detailParts.length ? `<div class="small">${detailParts.map(escapeHtml).join(' - ')}</div>` : ''}
             ${it.position ? `<div class="small text-muted">Pos: ${escapeHtml(it.position)}</div>` : ''}
           </div>
         </div>`;
