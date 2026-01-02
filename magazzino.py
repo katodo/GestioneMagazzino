@@ -432,6 +432,8 @@ def format_mm_short(value):
 
 MAIN_MEASURE_DEFAULT = "length"
 VALID_MEASURE_MODES = {"length", "thickness"}
+LENGTH_ABBR = "Lun."
+THICKNESS_ABBR = "Spess."
 
 
 def measure_mode_for_category(cat: Category | None) -> str:
@@ -494,7 +496,7 @@ def label_line2_text(item: Item) -> str:
     if is_screw(item):
         v = format_mm_short(item.length_mm)
         if v:
-            parts.append(f"L{v}")
+            parts.append(f"{LENGTH_ABBR} {v}")
         if item.material:
             parts.append(item.material.name)
     elif is_washer(item):
@@ -504,22 +506,26 @@ def label_line2_text(item: Item) -> str:
         v_e = format_mm_short(item.outer_d_mm)
         if v_e:
             parts.append(f"Øe{v_e}")
-        v_s = format_mm_short(unified_thickness_value(item))
+        v_s_raw = unified_thickness_value(item)
+        v_s = format_mm_short(v_s_raw)
         if v_s:
-            parts.append(f"sp{v_s}")
+            prefix = THICKNESS_ABBR if item.thickness_mm is not None else LENGTH_ABBR
+            parts.append(f"{prefix} {v_s}")
     elif is_standoff(item):
         v = format_mm_short(item.length_mm)
         if v:
-            parts.append(f"L{v}")
+            parts.append(f"{LENGTH_ABBR} {v}")
         if item.material:
             parts.append(item.material.name)
     else:
         v = format_mm_short(item.outer_d_mm)
         if v:
             parts.append(f"Øe{v}")
-        v_s = format_mm_short(unified_thickness_value(item))
+        v_s_raw = unified_thickness_value(item)
+        v_s = format_mm_short(v_s_raw)
         if v_s:
-            parts.append(f"sp{v_s}")
+            prefix = THICKNESS_ABBR if item.thickness_mm is not None else LENGTH_ABBR
+            parts.append(f"{prefix} {v_s}")
         if item.material:
             parts.append(item.material.name)
 
@@ -1182,7 +1188,7 @@ def build_full_grid(cabinet_id:int):
         key = f"{s.col_code}-{s.row_num}"
         cell = cells.get(key, {"blocked": False, "entries": [], "cat_id": None})
         text = short_cell_text(it)
-        summary = text.replace("\n", " · ")
+        summary = text.replace("\n", " - ")
         color = cat.color if cat else "#999"
         cell["entries"].append({
             "text": summary,
@@ -3170,15 +3176,19 @@ def labels_pdf():
 
             v = format_mm_short(unified_thickness_value(item))
             if v is not None:
-                parts.append(f"s{v}")
+                prefix = THICKNESS_ABBR if item.thickness_mm is not None else LENGTH_ABBR
+                parts.append(f"{prefix} {v}")
 
             if parts:
                 return " ".join(parts)
 
         # Per gli altri oggetti: se c'è spessore, aggiungi un breve "sX"
         v = format_mm_short(unified_thickness_value(item))
-        if v is not None and f"s{v}" not in base:
-            base = f"{base} s{v}"
+        if v is not None:
+            prefix = THICKNESS_ABBR if item.thickness_mm is not None else LENGTH_ABBR
+            formatted = f"{prefix} {v}"
+            if formatted not in base:
+                base = f"{base} {formatted}"
 
         return base
 
