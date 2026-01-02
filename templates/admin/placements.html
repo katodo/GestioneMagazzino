@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% set container_class = "container-fluid" %}
+{% set container_extra_class = "grid-page" %}
 {% block content %}
 <h3>Posizionamento articoli</h3>
 
@@ -89,12 +91,12 @@
   {% endfor %}
 </div>
 
-<div class="grid-wrap p-2">
+<div class="grid-wrap p-2 bg-white">
   {% if grid.rows and grid.cols %}
-  <table class="grid-table table table-sm mb-0" id="autoGrid">
+  <table class="grid-table" id="autoGrid">
     <thead>
       <tr>
-        <th class="rowhdr"></th>
+        <th class="rowhdr">r\\c</th>
         {% for col in grid.cols %}
           <th>{{ col }}</th>
         {% endfor %}
