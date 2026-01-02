@@ -1034,6 +1034,7 @@ def _render_articles_page():
     )
     text_q = (request.args.get("q") or "").strip()
     category_id = request.args.get("category_id", type=int)
+    subtype_id = request.args.get("subtype_id", type=int)
     material_id = request.args.get("material_id", type=int)
     finish_id = request.args.get("finish_id", type=int)
     measure_q = (request.args.get("measure") or request.args.get("thread_size") or "").strip()
@@ -1052,6 +1053,8 @@ def _render_articles_page():
         ))
     if category_id:
         items_q = items_q.filter(Item.category_id == category_id)
+    if subtype_id:
+        items_q = items_q.filter(Item.subtype_id == subtype_id)
     if material_id:
         items_q = items_q.filter(Item.material_id == material_id)
     if finish_id:
@@ -1125,6 +1128,7 @@ def _render_articles_page():
         default_standard_code=default_standard_code,
         pos_by_item=pos_by_item,
         custom_fields=serialized_custom_fields,
+        subtypes=subtypes,
         category_fields=category_fields,
         unplaced_count=unplaced_count,
         low_stock_count=low_stock_count,
