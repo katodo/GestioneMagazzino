@@ -306,6 +306,7 @@ function initCellPopovers(gridId){
     const content = items.map(it=>{
       const detailParts = [];
       if (it.thread_size) detailParts.push(it.thread_size);
+      if (it.main_measure && it.main_measure.value) detailParts.push(`${it.main_measure.label}: ${it.main_measure.value}`);
       if (it.quantity !== null && it.quantity !== undefined) detailParts.push(`Q.ta ${it.quantity}`);
       if (it.share_drawer) detailParts.push('Condividi cassetto');
       return `

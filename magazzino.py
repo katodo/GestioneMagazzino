@@ -99,6 +99,7 @@ class Category(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), unique=True, nullable=False)
     color = db.Column(db.String(7), nullable=False, default="#000000")  # HEX
+    main_measure_mode = db.Column(db.String(16), nullable=False, default="length")
     __table_args__ = (db.Index("ix_category_name", "name"),)
 
 class Material(db.Model):
@@ -429,6 +430,52 @@ def format_mm_short(value):
         return str(int(round(v)))
     return f"{v:.1f}".rstrip("0").rstrip(".")
 
+MAIN_MEASURE_DEFAULT = "length"
+VALID_MEASURE_MODES = {"length", "thickness"}
+
+
+def measure_mode_for_category(cat: Category | None) -> str:
+    mode = getattr(cat, "main_measure_mode", None) or MAIN_MEASURE_DEFAULT
+    return mode if mode in VALID_MEASURE_MODES else MAIN_MEASURE_DEFAULT
+
+
+def measure_label_for_mode(mode: str, include_units: bool = True) -> str:
+    base = "Spessore" if mode == "thickness" else "Lunghezza"
+    return f"{base} (mm)" if include_units else base
+
+
+def measure_label_for_category(cat: Category | None, include_units: bool = True) -> str:
+    return measure_label_for_mode(measure_mode_for_category(cat), include_units)
+
+
+def main_measure_value(item: Item | None):
+    if not item:
+        return None
+    mode = measure_mode_for_category(item.category)
+    if mode == "thickness":
+        return item.thickness_mm if item.thickness_mm is not None else item.length_mm
+    return item.length_mm if item.length_mm is not None else item.thickness_mm
+
+
+def formatted_main_measure(item: Item | None) -> str | None:
+    return format_mm_short(main_measure_value(item))
+
+
+def main_measure_info(item: Item) -> dict | None:
+    value = formatted_main_measure(item)
+    if not value:
+        return None
+    mode = measure_mode_for_category(item.category)
+    return {
+        "mode": mode,
+        "value": value,
+        "label": measure_label_for_mode(mode, include_units=False),
+    }
+
+
+def build_measure_labels(categories):
+    return {c.id: measure_label_for_category(c) for c in categories}
+
 def label_line1_text(item: Item) -> str:
     """Testo riga 1 dell'etichetta: Categoria + Sottotipo + Misura filettatura."""
     parts = []
@@ -535,6 +582,21 @@ def ensure_item_columns():
             db.session.rollback()
             return
 
+def ensure_category_columns():
+    """Aggiunge colonne mancanti nella tabella category (compatibilità DB esistenti)."""
+    try:
+        rows = db.session.execute(text("PRAGMA table_info(category)")).fetchall()
+    except Exception:
+        return
+    existing_cols = {r[1] for r in rows}
+    if "main_measure_mode" not in existing_cols:
+        try:
+            db.session.execute(text("ALTER TABLE category ADD COLUMN main_measure_mode VARCHAR(16) DEFAULT 'length'"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            return
+
 def ensure_mqtt_settings_columns():
     """Aggiunge eventuali nuove colonne della configurazione MQTT (compatibilità DB esistenti)."""
     try:
@@ -561,6 +623,7 @@ def ensure_mqtt_settings_columns():
 def get_settings()->Settings:
     ensure_settings_columns()
     ensure_item_columns()
+    ensure_category_columns()
     s = Settings.query.get(1)
     if not s:
         s = Settings(id=1,
@@ -707,7 +770,13 @@ def publish_mqtt_payload(payload: dict, settings: MqttSettings):
 
 @app.context_processor
 def inject_utils():
-    return dict(compose_caption=auto_name_for, app_settings=get_settings)
+    return dict(
+        compose_caption=auto_name_for,
+        app_settings=get_settings,
+        measure_label_for_category=measure_label_for_category,
+        formatted_main_measure=formatted_main_measure,
+        main_measure_value=main_measure_value,
+    )
 
 def load_form_options():
     thread_standards = ThreadStandard.query.order_by(ThreadStandard.sort_order, ThreadStandard.label).all()
@@ -877,9 +946,19 @@ def build_field_definitions(custom_fields):
     return defs
 
 def parse_length_thickness_value(raw_value):
-    if not raw_value:
+    if raw_value is None or raw_value == "":
+        return None
+    return float(raw_value)
+
+
+def split_main_measure_for_category(category: Category | None, raw_value):
+    """Restituisce la misura principale separata in lunghezza o spessore in base alla categoria."""
+    value = parse_length_thickness_value(raw_value)
+    if value is None:
         return None, None
-    value = float(raw_value)
+    mode = measure_mode_for_category(category)
+    if mode == "thickness":
+        return None, value
     return value, None
 
 def save_custom_field_values(item: Item, form):
@@ -985,6 +1064,7 @@ def _render_articles_page():
     finishes   = Finish.query.order_by(Finish.name).all()
     locations  = Location.query.order_by(Location.name).all()
     cabinets   = Cabinet.query.order_by(Cabinet.name).all()
+    measure_labels = build_measure_labels(categories)
 
     assignments = (
         db.session.query(Assignment.item_id, Cabinet.name, Slot.col_code, Slot.row_num)
@@ -1032,6 +1112,7 @@ def _render_articles_page():
         is_admin=current_user.is_authenticated,
         stock_filter=stock_filter,
         measure_q=measure_q,
+        measure_labels=measure_labels,
     )
 
 @app.route("/")
@@ -1112,6 +1193,7 @@ def build_full_grid(cabinet_id:int):
             "share_drawer": bool(getattr(it, "share_drawer", False)),
             "position": f"{s.col_code}{s.row_num}",
             "thread_size": it.thread_size,
+            "main_measure": main_measure_info(it),
         })
         if cell["cat_id"] is None and it.category_id:
             cell["cat_id"] = it.category_id
@@ -1326,10 +1408,20 @@ def to_place():
 @login_required
 def add_item():
     f = request.form
-    length_mm, thickness_mm = parse_length_thickness_value(f.get("length_mm"))
+    try:
+        category_id = int(f.get("category_id"))
+    except Exception:
+        flash("Categoria non valida.", "danger")
+        return redirect(url_for("admin_items"))
+    category = Category.query.get_or_404(category_id)
+    try:
+        length_mm, thickness_mm = split_main_measure_for_category(category, f.get("length_mm"))
+    except ValueError:
+        flash("Valore Lunghezza/Spessore non valido.", "danger")
+        return redirect(url_for("admin_items"))
     item = Item(
         description=f.get("description") or None,
-        category_id=int(f.get("category_id")),
+        category_id=category.id,
         subtype_id=int(f.get("subtype_id")) if f.get("subtype_id") else None,
         thread_standard=f.get("thread_standard") or None,
         thread_size=f.get("thread_size") or None,
@@ -1372,9 +1464,15 @@ def edit_item(item_id):
     item = Item.query.get_or_404(item_id)
     if request.method == "POST":
         f = request.form
-        length_mm, thickness_mm = parse_length_thickness_value(f.get("length_mm"))
+        try:
+            category_id = int(f.get("category_id"))
+            category = Category.query.get_or_404(category_id)
+            length_mm, thickness_mm = split_main_measure_for_category(category, f.get("length_mm"))
+        except ValueError:
+            flash("Valore Lunghezza/Spessore non valido.", "danger")
+            return redirect(url_for("edit_item", item_id=item.id))
         item.description = f.get("description") or None
-        item.category_id = int(f.get("category_id"))
+        item.category_id = category.id
         item.subtype_id = int(f.get("subtype_id")) if f.get("subtype_id") else None
         item.thread_standard = f.get("thread_standard") or None
         item.thread_size = f.get("thread_size") or None
@@ -1425,6 +1523,7 @@ def edit_item(item_id):
         for val in ItemCustomFieldValue.query.filter_by(item_id=item.id).all()
     }
     category_fields = build_category_field_map(categories)
+    measure_labels = build_measure_labels(categories)
 
     return render_template("admin/edit_item.html",
         item=item, categories=categories, materials=materials, finishes=finishes,
@@ -1433,6 +1532,7 @@ def edit_item(item_id):
         custom_fields=serialized_custom_fields,
         custom_field_values=custom_field_values,
         category_fields=category_fields,
+        measure_labels=measure_labels,
         current_cabinet_id=current_cabinet_id,
         current_col_code=current_col_code,
         current_row_num=current_row_num
@@ -1561,6 +1661,78 @@ def clear_position(item_id):
     flash("Posizione rimossa.", "success")
     return redirect(url_for("edit_item", item_id=item_id))
 
+@app.route("/admin/items/<int:item_id>/move_slot", methods=["POST"])
+@login_required
+def move_item_slot(item_id):
+    item = Item.query.get_or_404(item_id)
+    cab_to  = request.form.get("cabinet_id")
+    col_to  = (request.form.get("col_code") or "").strip().upper()
+    row_to  = request.form.get("row_num")
+    if not (cab_to and col_to and row_to):
+        flash("Compila cabinet, riga e colonna per spostare il cassetto.", "danger")
+        return redirect(url_for("edit_item", item_id=item.id))
+    try:
+        cab_to = int(cab_to)
+        row_to = int(row_to)
+    except Exception:
+        flash("Coordinate destinazione non valide.", "danger")
+        return redirect(url_for("edit_item", item_id=item.id))
+
+    assign = Assignment.query.filter_by(item_id=item.id).first()
+    if not assign:
+        flash("Questo articolo non ha una posizione da spostare.", "warning")
+        return redirect(url_for("edit_item", item_id=item.id))
+    src_slot = db.session.get(Slot, assign.slot_id)
+    if not src_slot:
+        flash("Slot origine non trovato.", "danger")
+        return redirect(url_for("edit_item", item_id=item.id))
+
+    region_from = merge_region_for(src_slot.cabinet_id, src_slot.col_code, src_slot.row_num)
+    if region_from:
+        anchor_col = region_from["anchor_col"]
+        anchor_row = region_from["anchor_row"]
+        src_slot = Slot.query.filter_by(cabinet_id=src_slot.cabinet_id, col_code=anchor_col, row_num=anchor_row).first() or _ensure_slot(src_slot.cabinet_id, anchor_col, anchor_row)
+
+    region_to = merge_region_for(cab_to, col_to, row_to)
+    if region_to:
+        col_to = region_to["anchor_col"]
+        row_to = region_to["anchor_row"]
+
+    dst_slot = _ensure_slot(cab_to, col_to, row_to)
+    if dst_slot.is_blocked:
+        flash("La destinazione è bloccata.", "danger")
+        return redirect(url_for("edit_item", item_id=item.id))
+    if src_slot.is_blocked:
+        flash("Il cassetto origine è bloccato: impossibile spostare.", "danger")
+        return redirect(url_for("edit_item", item_id=item.id))
+
+    src_assigns = Assignment.query.filter_by(slot_id=src_slot.id).all()
+    dst_assigns = Assignment.query.filter_by(slot_id=dst_slot.id).all()
+    if not src_assigns:
+        flash("Nessun contenuto da spostare nel cassetto corrente.", "warning")
+        return redirect(url_for("edit_item", item_id=item.id))
+
+    src_cats = _slot_categories(src_slot.id)
+    dst_cats = _slot_categories(dst_slot.id)
+    if dst_assigns and (src_cats and dst_cats) and (list(src_cats)[0] != list(dst_cats)[0]):
+        flash("Le categorie dei cassetti non coincidono.", "danger")
+        return redirect(url_for("edit_item", item_id=item.id))
+
+    cab_to_obj = db.session.get(Cabinet, cab_to)
+    if not cab_to_obj:
+        flash("Cassettiera destinazione non trovata.", "danger")
+        return redirect(url_for("edit_item", item_id=item.id))
+    if not _slot_capacity_ok(cab_to_obj, len(dst_assigns) + len(src_assigns)):
+        flash("Scomparti insufficienti nel cassetto destinazione.", "danger")
+        return redirect(url_for("edit_item", item_id=item.id))
+
+    for a in src_assigns:
+        a.slot_id = dst_slot.id
+    _reassign_compartments(dst_slot.id, cab_to_obj)
+    db.session.commit()
+    flash("Cassetto spostato.", "success")
+    return redirect(url_for("edit_item", item_id=item.id))
+
 def _admin_config_url(anchor=None):
     base = url_for("admin_config")
     return f"{base}#{anchor}" if anchor else base
@@ -1576,9 +1748,12 @@ def admin_categories():
 def add_category():
     name = request.form.get("name","").strip()
     color = request.form.get("color","#000000").strip()
+    mode = (request.form.get("main_measure_mode","") or MAIN_MEASURE_DEFAULT).strip().lower()
+    if mode not in VALID_MEASURE_MODES:
+        mode = MAIN_MEASURE_DEFAULT
     if len(name) < 2: return _flash_back("Nome categoria troppo corto.", "danger", "admin_config", "categorie")
     if Category.query.filter_by(name=name).first(): return _flash_back("Categoria già esistente.", "danger", "admin_config", "categorie")
-    db.session.add(Category(name=name, color=color)); db.session.commit()
+    db.session.add(Category(name=name, color=color, main_measure_mode=mode)); db.session.commit()
     flash("Categoria aggiunta.", "success"); return redirect(_admin_config_url("categorie"))
 
 @app.route("/admin/categories/<int:cat_id>/update", methods=["POST"])
@@ -1587,11 +1762,15 @@ def update_category(cat_id):
     cat = Category.query.get_or_404(cat_id)
     new_name = request.form.get("name","").strip()
     new_color = request.form.get("color","#000000").strip()
+    new_mode = request.form.get("main_measure_mode","").strip().lower()
+    if new_mode not in VALID_MEASURE_MODES:
+        new_mode = measure_mode_for_category(cat)
     if new_name and new_name != cat.name:
         if Category.query.filter(Category.id != cat.id, Category.name == new_name).first():
             return _flash_back("Esiste già una categoria con questo nome.", "danger", "admin_config", "categorie")
         cat.name = new_name
     cat.color = new_color or cat.color
+    cat.main_measure_mode = new_mode
     db.session.commit()
     flash("Categoria aggiornata.", "success"); return redirect(_admin_config_url("categorie"))
 
@@ -1774,6 +1953,7 @@ def delete_finish(fin_id):
 @app.route("/admin/config")
 @login_required
 def admin_config():
+    ensure_category_columns()
     locations = Location.query.order_by(Location.name).all()
     cabinets  = db.session.query(Cabinet, Location).join(Location, Cabinet.location_id==Location.id).order_by(Cabinet.name).all()
     drawer_merges = (
@@ -3297,6 +3477,7 @@ def cards_pdf():
 def seed_if_empty_or_missing():
     ensure_settings_columns()
     ensure_item_columns()
+    ensure_category_columns()
     if not User.query.filter_by(username="admin").first():
         db.session.add(User(username="admin", password="admin"))
     if not Settings.query.get(1):

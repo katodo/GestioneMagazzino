@@ -40,8 +40,8 @@
       <input type="number" step="0.01" class="form-control" name="outer_d_mm" value="{{ item.outer_d_mm or '' }}">
     </div>
     <div class="col-md-4 field-block" data-field-key="length_mm">
-      <label class="form-label">Lunghezza/Spessore (mm)</label>
-      <input type="number" step="0.01" class="form-control" name="length_mm" value="{{ item.length_mm if item.length_mm is not none else '' }}">
+      <label class="form-label" id="lengthLabelEdit">{{ measure_label_for_category(item.category) }}</label>
+      <input type="number" step="0.01" class="form-control" name="length_mm" id="lengthInputEdit" value="{{ main_measure_value(item) if main_measure_value(item) is not none else '' }}">
     </div>
     <div class="col-md-2 field-block" data-field-key="inner_d_mm">
       <label class="form-label">Ø interno (mm)</label>
@@ -127,7 +127,7 @@
       </div>
       <div class="form-check form-check-inline">
         <input class="form-check-input" type="checkbox" name="label_show_main" {{ 'checked' if item.label_show_main else '' }}>
-        <label class="form-check-label">Ø esterno/Lunghezza</label>
+        <label class="form-check-label">Ø esterno/Misura principale</label>
       </div>
       <div class="form-check form-check-inline">
         <input class="form-check-input" type="checkbox" name="label_show_material" {{ 'checked' if item.label_show_material else '' }}>
@@ -153,15 +153,16 @@
       <input type="number" min="1" max="128" class="form-control" id="row_num" name="row_num" value="{{ current_row_num }}">
     </div>
     <div class="col-md-2 d-flex align-items-end">
-      <button formaction="{{ url_for('set_position', item_id=item.id) }}" formmethod="post" class="btn btn-outline-primary w-100">Imposta</button>
+      <button formaction="{{ url_for('set_position', item_id=item.id) }}" formmethod="post" class="btn btn-outline-primary w-100" formnovalidate>Imposta</button>
     </div>
     <div class="col-md-3 d-flex align-items-end">
       <button type="button" id="btnSuggest" class="btn btn-outline-secondary w-100">Suggerisci</button>
     </div>
     <div class="col-md-3 d-flex align-items-end">
-      <form method="post" action="{{ url_for('clear_position', item_id=item.id) }}" onsubmit="return confirm('Rimuovere posizione?')">
-        <button class="btn btn-outline-danger w-100">Rimuovi</button>
-      </form>
+      <button class="btn btn-outline-dark w-100" formaction="{{ url_for('move_item_slot', item_id=item.id) }}" formmethod="post" formnovalidate>⋯ Sposta cassetto</button>
+    </div>
+    <div class="col-md-3 d-flex align-items-end">
+      <button class="btn btn-outline-danger w-100" formaction="{{ url_for('clear_position', item_id=item.id) }}" formmethod="post" formnovalidate onclick="return confirm('Rimuovere posizione?')">Rimuovi</button>
     </div>
 
     <div class="col-12 text-end mt-3">
@@ -174,6 +175,7 @@
 <script>
 const SUBTYPES = {{ subtypes_by_cat|tojson }};
 const CATEGORY_FIELDS = {{ category_fields|tojson }};
+const MEASURE_LABELS = {{ (measure_labels|default({}))|tojson }};
 
 function populateSubtypes(catId){
   const sel = document.getElementById('subtypeSel');
@@ -205,6 +207,11 @@ function applyFieldVisibility(catId){
     el.style.display = enabled.has(key) ? '' : 'none';
   });
 }
+function updateMeasureLabel(catId){
+  const label = MEASURE_LABELS[catId] || 'Lunghezza/Spessore (mm)';
+  const lblEl = document.getElementById('lengthLabelEdit');
+  if (lblEl) lblEl.textContent = label;
+}
 function switchDatalist(){
   const std = document.getElementById('stdSel').value;
   const inp = document.getElementById('sizeInput');
@@ -220,14 +227,16 @@ function switchDatalist(){
   }
 }
 
-document.addEventListener('DOMContentLoaded', ()=>{
+  document.addEventListener('DOMContentLoaded', ()=>{
   populateSubtypes({{ item.category_id }});
   applyFieldVisibility({{ item.category_id }});
+  updateMeasureLabel({{ item.category_id }});
   switchDatalist();
   document.getElementById('catSel').addEventListener('change', ()=>{
     const catId = parseInt(document.getElementById('catSel').value||0);
     populateSubtypes(catId);
     applyFieldVisibility(catId);
+    updateMeasureLabel(catId);
   });
   document.getElementById('stdSel').addEventListener('change', switchDatalist);
   document.getElementById('btnSuggest').addEventListener('click', async ()=>{

@@ -184,7 +184,7 @@
   <table class="table table-striped table-hover align-middle mb-0" id="itemsTable">
     <thead><tr>
       <th>ID</th><th>Categoria</th><th>Descrizione</th><th>Misura</th>
-      <th>Ø esterno (mm)</th><th>Lunghezza/Spessore (mm)</th><th>Materiale</th><th>Quantità</th><th>Posizione</th>
+      <th>Ø esterno (mm)</th><th>Misura principale (mm)</th><th>Materiale</th><th>Quantità</th><th>Posizione</th>
     </tr></thead>
     <tbody>
       {% for item in items %}
@@ -195,7 +195,11 @@
         <td>{{ item.thread_size }}</td>
         <td>{{ '%.2f'|format(item.outer_d_mm) if item.outer_d_mm is not none else '' }}</td>
         <td>
-          {{ '%.2f'|format(item.length_mm) if item.length_mm is not none else '' }}
+          {% set mm = formatted_main_measure(item) %}
+          {% if mm %}
+            <span class="text-muted small">{{ measure_label_for_category(item.category, include_units=False) }}:</span>
+            <span class="fw-semibold">{{ mm }}</span>
+          {% endif %}
         </td>
         <td>{{ item.material.name if item.material else '' }}</td>
         <td>
@@ -446,17 +450,18 @@ function initCellPopovers(gridId){
   grid.querySelectorAll('td.cell-used').forEach(td=>{
     const raw = td.dataset.items;
     if (!raw) return;
-    let items = [];
-    try { items = JSON.parse(raw); } catch { items = []; }
-    if (!items.length) return;
-    const content = items.map(it=>{
-      const detailParts = [];
-      if (it.thread_size) detailParts.push(it.thread_size);
-      if (it.quantity !== null && it.quantity !== undefined) detailParts.push(`Q.ta ${it.quantity}`);
-      if (it.share_drawer) detailParts.push('Condividi cassetto');
-      return `
-        <div class="d-flex align-items-start mb-1">
-          <span class="badge-color flex-shrink-0 mt-1" style="background:${it.color || '#999'};"></span>
+      let items = [];
+      try { items = JSON.parse(raw); } catch { items = []; }
+      if (!items.length) return;
+      const content = items.map(it=>{
+        const detailParts = [];
+        if (it.thread_size) detailParts.push(it.thread_size);
+        if (it.main_measure && it.main_measure.value) detailParts.push(`${it.main_measure.label}: ${it.main_measure.value}`);
+        if (it.quantity !== null && it.quantity !== undefined) detailParts.push(`Q.ta ${it.quantity}`);
+        if (it.share_drawer) detailParts.push('Condividi cassetto');
+        return `
+          <div class="d-flex align-items-start mb-1">
+            <span class="badge-color flex-shrink-0 mt-1" style="background:${it.color || '#999'};"></span>
           <div class="ms-2">
             <div class="fw-semibold">${escapeHtml(it.name || it.text || '')}</div>
             ${it.description ? `<div class="small text-muted">${escapeHtml(it.description)}</div>` : ''}
