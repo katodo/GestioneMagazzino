@@ -396,16 +396,28 @@ document.addEventListener('DOMContentLoaded', function(){
 
   document.getElementById('assignForm')?.addEventListener('submit', async function(ev){
     ev.preventDefault();
-    const fd = new FormData(ev.target);
-    const r = await fetch('{{ url_for("grid_assign") }}', { method:'POST', body: fd });
-    const j = await r.json().catch(()=>({ok:false, error:'Errore sconosciuto'}));
-    if (!j.ok) {
+    const form = ev.target;
+    const submitAssign = async (forceShare=false) => {
+      const fd = new FormData(form);
+      if (forceShare) fd.append('force_share', '1');
+      const r = await fetch('{{ url_for("grid_assign") }}', { method:'POST', body: fd });
+      const j = await r.json().catch(()=>({ok:false, error:'Errore sconosciuto'}));
+      if (j.ok) {
+        location.reload();
+        return;
+      }
+      if (j.share_blockers && !forceShare) {
+        const names = j.share_blockers.map(b=>b.name).join(', ');
+        const confirmMsg = 'Il cassetto contiene articoli che non supportano la condivisione.\nVuoi impostare "Permetti di condividere il cassetto con altri articoli compatibili" per tutti gli articoli coinvolti?\nCoinvolti: ' + names;
+        if (confirm(confirmMsg)) {
+          return submitAssign(true);
+        }
+      }
       const el = document.getElementById('assignError');
       el.textContent = j.error || 'Errore di assegnazione';
       el.classList.remove('d-none');
-    } else {
-      location.reload();
-    }
+    };
+    submitAssign();
   });
 
   const btnNewItem = document.getElementById('btnNewItem');
