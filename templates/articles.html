@@ -433,7 +433,7 @@ function clearKeepParams(){
 document.addEventListener('DOMContentLoaded', ()=>{
   const tableSelector = '#articlesTable';
   const excludedSelectors = 'a, button, input, label, select';
-  const defaultOrder = {{ '[[1,\"asc\"]]' if is_admin else '[[0,\"asc\"]]' }};
+  const defaultOrder = {{ ([ [1, "asc"] ] if is_admin else [ [0, "asc"] ]) | tojson }};
   if ($.fn.DataTable) {
     $(tableSelector).DataTable({
       pageLength:25,
