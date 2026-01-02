@@ -24,7 +24,7 @@
       <p class="text-muted mb-2 small">Gestisci nome e colore delle categorie usate in tutto il prodotto.</p>
       <table class="table table-sm table-striped align-middle">
         <thead>
-          <tr><th style="width:60px;">ID</th><th>Nome</th><th style="width:70px;">Colore</th><th class="text-end" style="width:150px;">Azione</th></tr>
+          <tr><th style="width:60px;">ID</th><th>Nome</th><th style="width:70px;">Colore</th><th style="width:180px;">Lunghezza/Spessore</th><th class="text-end" style="width:150px;">Azione</th></tr>
         </thead>
         <tbody>
           {% for c in categories %}
@@ -35,6 +35,12 @@
             </td>
             <td>
               <input type="color" class="form-control form-control-color" name="color" value="{{ c.color }}" form="cat-{{ c.id }}">
+            </td>
+            <td>
+              <select class="form-select" name="main_measure_mode" form="cat-{{ c.id }}">
+                <option value="length" {{ 'selected' if c.main_measure_mode == 'length' else '' }}>Lunghezza</option>
+                <option value="thickness" {{ 'selected' if c.main_measure_mode == 'thickness' else '' }}>Spessore</option>
+              </select>
             </td>
             <td class="text-end">
               <form method="post" action="{{ url_for('update_category', cat_id=c.id) }}" id="cat-{{ c.id }}" class="d-inline-block">
@@ -61,6 +67,12 @@
           </div>
           <div class="col-md-3">
             <input type="color" class="form-control form-control-color" name="color" value="#607D8B">
+          </div>
+          <div class="col-md-3">
+            <select class="form-select" name="main_measure_mode">
+              <option value="length">Lunghezza</option>
+              <option value="thickness">Spessore</option>
+            </select>
           </div>
           <div class="col-md-3">
             <button class="btn btn-primary w-100">Aggiungi</button>
