@@ -175,7 +175,11 @@ function openAssignModal(col, row, catFilter){
   });
   document.getElementById('totCnt').textContent = list.length;
   document.getElementById('flt').value = '';
-  document.getElementById('assignError').classList.add('d-none');
+  const errEl = document.getElementById('assignError');
+  if (errEl) {
+    errEl.classList.add('d-none');
+    errEl.innerHTML = '';
+  }
   modal.show();
 }
 
@@ -407,11 +411,16 @@ document.addEventListener('DOMContentLoaded', function(){
         return;
       }
       if (j.share_blockers && !forceShare) {
-        const names = j.share_blockers.map(b=>b.name).join(', ');
-        const confirmMsg = 'Il cassetto contiene articoli che non supportano la condivisione.\nVuoi impostare "Permetti di condividere il cassetto con altri articoli compatibili" per tutti gli articoli coinvolti?\nCoinvolti: ' + names;
-        if (confirm(confirmMsg)) {
-          return submitAssign(true);
+        const names = j.share_blockers.map(b => escapeHtml(b.name || '')).filter(Boolean);
+        const blockersList = names.length ? `<ul class="mb-2">${names.map(n => `<li>${n}</li>`).join('')}</ul>` : '';
+        const el = document.getElementById('assignError');
+        if (el) {
+          el.innerHTML = `Il cassetto contiene articoli che non supportano la condivisione. Abilita "Permetti di condividere il cassetto con altri articoli compatibili" su tutti gli articoli coinvolti per procedere.${blockersList}<button type="button" class="btn btn-sm btn-primary" data-role="force-share">Abilita e assegna</button>`;
+          el.classList.remove('d-none');
+          const btnForce = el.querySelector('[data-role="force-share"]');
+          btnForce?.addEventListener('click', () => submitAssign(true), { once: true });
         }
+        return;
       }
       const el = document.getElementById('assignError');
       el.textContent = j.error || 'Errore di assegnazione';
