@@ -234,6 +234,15 @@
       </select>
     </div>
     <div class="col-md-2">
+      <label class="form-label small text-muted mb-1">Sottotipo</label>
+      <select name="subtype_id" class="form-select">
+        <option value="">Tutti</option>
+        {% for st in subtypes %}
+          <option value="{{ st.id }}" {{ 'selected' if (request.args.get('subtype_id')|int)==st.id else '' }}>{{ st.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
       <label class="form-label small text-muted mb-1">Materiale</label>
       <select name="material_id" class="form-select">
         <option value="">Tutti</option>
@@ -285,9 +294,9 @@
       <a href="{{ url_for('articles') }}" class="btn btn-outline-secondary btn-sm">Reset</a>
     </div>
     <div class="col-12 d-flex flex-wrap gap-2">
-      <a class="btn btn-outline-dark btn-sm {{ 'active' if stock_filter == 'available' else '' }}" href="{{ url_for('articles', stock='available', q=request.args.get('q'), category_id=request.args.get('category_id'), material_id=request.args.get('material_id'), finish_id=request.args.get('finish_id'), measure=request.args.get('measure'), pos_cabinet_id=request.args.get('pos_cabinet_id'), pos_col=request.args.get('pos_col'), pos_row=request.args.get('pos_row'), share_drawer=request.args.get('share_drawer')) }}">Disponibili</a>
-      <a class="btn btn-outline-warning btn-sm {{ 'active' if stock_filter == 'low' else '' }}" href="{{ url_for('articles', stock='low', q=request.args.get('q'), category_id=request.args.get('category_id'), material_id=request.args.get('material_id'), finish_id=request.args.get('finish_id'), measure=request.args.get('measure'), pos_cabinet_id=request.args.get('pos_cabinet_id'), pos_col=request.args.get('pos_col'), pos_row=request.args.get('pos_row'), share_drawer=request.args.get('share_drawer')) }}">Scorte basse</a>
-      <a class="btn btn-outline-danger btn-sm {{ 'active' if stock_filter == 'out' else '' }}" href="{{ url_for('articles', stock='out', q=request.args.get('q'), category_id=request.args.get('category_id'), material_id=request.args.get('material_id'), finish_id=request.args.get('finish_id'), measure=request.args.get('measure'), pos_cabinet_id=request.args.get('pos_cabinet_id'), pos_col=request.args.get('pos_col'), pos_row=request.args.get('pos_row'), share_drawer=request.args.get('share_drawer')) }}">Esauriti</a>
+      <a class="btn btn-outline-dark btn-sm {{ 'active' if stock_filter == 'available' else '' }}" href="{{ url_for('articles', stock='available', q=request.args.get('q'), category_id=request.args.get('category_id'), subtype_id=request.args.get('subtype_id'), material_id=request.args.get('material_id'), finish_id=request.args.get('finish_id'), measure=request.args.get('measure'), pos_cabinet_id=request.args.get('pos_cabinet_id'), pos_col=request.args.get('pos_col'), pos_row=request.args.get('pos_row'), share_drawer=request.args.get('share_drawer')) }}">Disponibili</a>
+      <a class="btn btn-outline-warning btn-sm {{ 'active' if stock_filter == 'low' else '' }}" href="{{ url_for('articles', stock='low', q=request.args.get('q'), category_id=request.args.get('category_id'), subtype_id=request.args.get('subtype_id'), material_id=request.args.get('material_id'), finish_id=request.args.get('finish_id'), measure=request.args.get('measure'), pos_cabinet_id=request.args.get('pos_cabinet_id'), pos_col=request.args.get('pos_col'), pos_row=request.args.get('pos_row'), share_drawer=request.args.get('share_drawer')) }}">Scorte basse</a>
+      <a class="btn btn-outline-danger btn-sm {{ 'active' if stock_filter == 'out' else '' }}" href="{{ url_for('articles', stock='out', q=request.args.get('q'), category_id=request.args.get('category_id'), subtype_id=request.args.get('subtype_id'), material_id=request.args.get('material_id'), finish_id=request.args.get('finish_id'), measure=request.args.get('measure'), pos_cabinet_id=request.args.get('pos_cabinet_id'), pos_col=request.args.get('pos_col'), pos_row=request.args.get('pos_row'), share_drawer=request.args.get('share_drawer')) }}">Esauriti</a>
     </div>
   </form>
 
