@@ -626,10 +626,25 @@ def ensure_mqtt_settings_columns():
     if added:
         db.session.commit()
 
-def get_settings()->Settings:
+_schema_checked = False
+
+def ensure_core_schema():
+    """Esegue una verifica unica dello schema per aggiungere colonne mancanti."""
+    global _schema_checked
+    if _schema_checked:
+        return
     ensure_settings_columns()
     ensure_item_columns()
     ensure_category_columns()
+    ensure_mqtt_settings_columns()
+    _schema_checked = True
+
+@app.before_request
+def prepare_schema():
+    ensure_core_schema()
+
+def get_settings()->Settings:
+    ensure_core_schema()
     s = Settings.query.get(1)
     if not s:
         s = Settings(id=1,
@@ -658,7 +673,7 @@ def get_settings()->Settings:
     return s
 
 def get_mqtt_settings() -> MqttSettings:
-    ensure_mqtt_settings_columns()
+    ensure_core_schema()
     s = MqttSettings.query.get(1)
     if not s:
         s = MqttSettings(
@@ -1009,6 +1024,7 @@ def logout():
 
 # ===================== PUBLIC =====================
 def _render_articles_page():
+    ensure_core_schema()
     low_stock_threshold = 5
     items_q    = Item.query.options(
         selectinload(Item.category),
