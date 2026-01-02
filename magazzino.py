@@ -1582,24 +1582,36 @@ def _load_slot_assignments(slot_id: int, ignore_item_id: int | None = None):
     items = Item.query.filter(Item.id.in_(item_ids)).all() if item_ids else []
     return assigns, items
 
-def _can_share_slot(existing_items: list[Item], new_item: Item) -> bool:
-    if not existing_items:
-        return True
-    if not new_item.share_drawer:
-        return False
-    measure_new = (new_item.thread_size or "").strip().lower()
-    category_new = new_item.category_id
-    for it in existing_items:
-        if not getattr(it, "share_drawer", False):
-            return False
-        if getattr(it, "category_id", None) != category_new:
-            return False
-        measure_existing = (getattr(it, "thread_size", None) or "").strip().lower()
-        if measure_existing != measure_new:
-            return False
-    return True
+def _normalize_thread_size(val: Optional[str]) -> str:
+    return (val or "").strip().lower()
 
-def _assign_position(item, cabinet_id:int, col_code:str, row_num:int):
+class SharePermissionError(RuntimeError):
+    def __init__(self, items: list[Item]):
+        super().__init__("Il cassetto contiene articoli che non supportano la condivisione.")
+        self.items = items
+
+def _share_slot_status(existing_items: list[Item], new_item: Item):
+    if not existing_items:
+        return True, []
+    measure_new = _normalize_thread_size(getattr(new_item, "thread_size", None))
+    category_new = getattr(new_item, "category_id", None)
+    for it in existing_items:
+        if getattr(it, "category_id", None) != category_new:
+            return False, []
+        if _normalize_thread_size(getattr(it, "thread_size", None)) != measure_new:
+            return False, []
+    blockers = [it for it in existing_items if not getattr(it, "share_drawer", False)]
+    if not getattr(new_item, "share_drawer", False):
+        blockers.append(new_item)
+    if blockers:
+        return False, blockers
+    return True, []
+
+def _can_share_slot(existing_items: list[Item], new_item: Item) -> bool:
+    ok, _ = _share_slot_status(existing_items, new_item)
+    return ok
+
+def _assign_position(item, cabinet_id:int, col_code:str, row_num:int, *, force_share: bool = False):
     if not column_code_valid(col_code):         raise ValueError("Colonna non valida (A..Z o AA..ZZ).")
     if not (1 <= int(row_num) <= 128):          raise ValueError("Riga non valida (1..128).")
     merge_region = merge_region_for(cabinet_id, col_code, row_num)
@@ -1614,8 +1626,15 @@ def _assign_position(item, cabinet_id:int, col_code:str, row_num:int):
 
     Assignment.query.filter_by(item_id=item.id).delete()
     same_slot, slot_items = _load_slot_assignments(slot.id, ignore_item_id=item.id)
-    if not _can_share_slot(slot_items, item):
-        raise RuntimeError("Il cassetto contiene articoli che non supportano la condivisione.")
+    can_share, blockers = _share_slot_status(slot_items, item)
+    if not can_share:
+        if blockers and force_share:
+            for it in blockers:
+                it.share_drawer = True
+        elif blockers:
+            raise SharePermissionError(blockers)
+        else:
+            raise RuntimeError("Il cassetto contiene articoli che non supportano la condivisione.")
 
     cab = db.session.get(Cabinet, int(cabinet_id))
     max_comp = cab.compartments_per_slot if cab else 6
@@ -1669,15 +1688,42 @@ def set_position(item_id):
     cab_id  = request.form.get("cabinet_id")
     row_num = request.form.get("row_num")
     col_code= request.form.get("col_code")
+    force_share = bool(request.form.get("force_share"))
     if not (cab_id and row_num and col_code):
         flash("Compila cabinet, riga e colonna.", "danger"); return redirect(url_for("edit_item", item_id=item.id))
     try:
-        _assign_position(item, int(cab_id), col_code, int(row_num))
+        _assign_position(item, int(cab_id), col_code, int(row_num), force_share=force_share)
         db.session.commit()
         flash("Posizione aggiornata.", "success")
+    except SharePermissionError as e:
+        db.session.rollback()
+        blocker_names = ", ".join(sorted({auto_name_for(it) for it in e.items}))
+        flash(f"Il cassetto contiene articoli che non supportano la condivisione: {blocker_names}.", "danger")
     except Exception as e:
         db.session.rollback(); flash(str(e), "danger")
     return redirect(url_for("edit_item", item_id=item.id))
+
+@app.route("/admin/items/<int:item_id>/set_position.json", methods=["POST"])
+@login_required
+def set_position_json(item_id):
+    item = Item.query.get_or_404(item_id)
+    cab_id  = request.form.get("cabinet_id")
+    row_num = request.form.get("row_num")
+    col_code= request.form.get("col_code")
+    force_share = bool(request.form.get("force_share"))
+    if not (cab_id and row_num and col_code):
+        return jsonify({"ok": False, "error": "Compila cabinet, riga e colonna."}), 400
+    try:
+        _assign_position(item, int(cab_id), col_code, int(row_num), force_share=force_share)
+        db.session.commit()
+        return jsonify({"ok": True})
+    except SharePermissionError as e:
+        db.session.rollback()
+        blockers = [{"id": it.id, "name": auto_name_for(it)} for it in e.items]
+        return jsonify({"ok": False, "error": str(e), "share_blockers": blockers}), 409
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(e)}), 400
 
 @app.route("/admin/items/<int:item_id>/clear_position", methods=["POST"])
 @login_required
@@ -2474,9 +2520,14 @@ def grid_assign():
         return jsonify({"ok":False, "error":"Parametri non validi."}), 400
     item = Item.query.get(item_id)
     if not item: return jsonify({"ok":False, "error":"Articolo inesistente."}), 404
+    force_share = bool(request.form.get("force_share"))
     try:
-        _assign_position(item, cabinet_id, col_code, row_num)
+        _assign_position(item, cabinet_id, col_code, row_num, force_share=force_share)
         db.session.commit()
+    except SharePermissionError as e:
+        db.session.rollback()
+        blockers = [{"id": it.id, "name": auto_name_for(it)} for it in e.items]
+        return jsonify({"ok":False, "error":str(e), "share_blockers": blockers}), 409
     except Exception as e:
         db.session.rollback()
         return jsonify({"ok":False, "error":str(e)}), 400
