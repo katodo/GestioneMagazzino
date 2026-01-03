@@ -1296,10 +1296,12 @@ def build_full_grid(cabinet_id:int):
         .filter(Slot.cabinet_id == cabinet_id)
         .all()
     )
-    slot_display_labels = {
-        f"{s.col_code}-{s.row_num}": slot_label(s, for_display=True)
-        for s in slot_rows
-    }
+    slot_display_labels = {}
+    slot_display_custom = {}
+    for s in slot_rows:
+        key = f"{s.col_code}-{s.row_num}"
+        slot_display_labels[key] = slot_label(s, for_display=True)
+        slot_display_custom[key] = bool((s.display_label_override or "").strip())
 
     assigns = (
         db.session.query(Assignment, Slot, Item, Category)
@@ -1319,12 +1321,13 @@ def build_full_grid(cabinet_id:int):
                 "entries": [],
                 "cat_id": None,
                 "label": slot_display_labels.get(key) or f"{s.col_code}{s.row_num}",
+                "label_custom": slot_display_custom.get(key, False),
             }
 
     for a, s, it, cat in assigns:
         key = f"{s.col_code}-{s.row_num}"
         label = slot_display_labels.get(key) or f"{s.col_code}{s.row_num}"
-        cell = cells.get(key, {"blocked": False, "entries": [], "cat_id": None, "label": label})
+        cell = cells.get(key, {"blocked": False, "entries": [], "cat_id": None, "label": label, "label_custom": slot_display_custom.get(key, False)})
         text = short_cell_text(it)
         summary = text.replace("\n", " - ")
         color = cat.color if cat else "#999"
@@ -1343,6 +1346,8 @@ def build_full_grid(cabinet_id:int):
             cell["cat_id"] = it.category_id
         if not cell.get("label"):
             cell["label"] = label
+        if cell.get("label_custom") is None:
+            cell["label_custom"] = slot_display_custom.get(key, False)
         cells[key] = cell
 
     for anchor_key, region in merge_regions.items():
@@ -1351,6 +1356,7 @@ def build_full_grid(cabinet_id:int):
             "entries": [],
             "cat_id": None,
             "label": slot_display_labels.get(anchor_key) or f"{region['col_start']}{region['row_start']}",
+            "label_custom": slot_display_custom.get(anchor_key, False),
         }
         for col, row in merge_cells_from_region(region):
             key = f"{col}-{row}"
@@ -1364,6 +1370,10 @@ def build_full_grid(cabinet_id:int):
                         merged_cell["cat_id"] = cell.get("cat_id")
                 if merged_cell["cat_id"] is None and cell.get("cat_id"):
                     merged_cell["cat_id"] = cell.get("cat_id")
+                if not merged_cell["label_custom"] and cell.get("label_custom"):
+                    merged_cell["label_custom"] = True
+                    if cell.get("label"):
+                        merged_cell["label"] = cell["label"]
         cells[anchor_key] = merged_cell
 
     return {
@@ -3518,12 +3528,16 @@ def labels_pdf():
         if entry.get("is_multi"):
             col_code = getattr(slot, "col_code", "") or ""
             row_num = getattr(slot, "row_num", None)
-            label_txt = slot_label(slot, for_display=False, fallback_col=col_code, fallback_row=row_num)
+            label_txt = slot_label(slot, for_display=False, fallback_col=col_code, fallback_row=row_num) or ""
             c.setFillColorRGB(0, 0, 0)
+            font_name = "Helvetica-Bold"
             font_size = 14
-            c.setFont("Helvetica-Bold", font_size)
-            text_y = y + (lab_h / 2) + (font_size / 2)
-            c.drawCentredString(x + (lab_w / 2), text_y, label_txt or "")
+            c.setFont(font_name, font_size)
+            ascent = pdfmetrics.getAscent(font_name) / 1000 * font_size
+            descent = abs(pdfmetrics.getDescent(font_name) / 1000 * font_size)
+            text_height = ascent + descent
+            text_y = y + (lab_h / 2) - (text_height / 2) + ascent
+            c.drawCentredString(x + (lab_w / 2), text_y, label_txt)
             continue
 
         # Barra colore categoria in alto

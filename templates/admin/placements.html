@@ -113,20 +113,32 @@
             {% set cell = grid.cells.get(key) %}
             {% set merge = grid.merge_anchors.get(key) if grid.merge_anchors else None %}
             {% set cell_label = cell.label if cell and cell.label else col ~ r %}
+            {% set cell_custom = cell.label_custom if cell else False %}
+            {% set display_label = cell_label %}
+            {% if not cell_custom and cell and cell.entries and (cell.entries|length)>0 %}
+              {% set first_entry = cell.entries[0] %}
+              {% set display_label = first_entry.name if first_entry.name else first_entry.text %}
+            {% endif %}
             {% if not cell %}
               <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="">
                 <div class="cell-inner">{{ cell_label }}</div>
               </td>
             {% else %}
               {% if cell.blocked %}
-                <td class="cell-blocked" data-col="{{ col }}" data-row="{{ r }}" data-cat="blocked" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
+                <td class="cell-blocked" data-col="{{ col }}" data-row="{{ r }}" data-cat="blocked" data-label="{{ display_label }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
                   <div class="cell-inner">{{ cell_label }}</div>
                 </td>
               {% else %}
                 {% set bg = cell.entries[0].color if cell.entries else '#6c757d' %}
-                <td class="cell-used" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" data-items='{{ cell.entries|tojson }}' data-label="{{ cell_label }}" style="background:{{ bg }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
+                <td class="cell-used" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" data-items='{{ cell.entries|tojson }}' data-label="{{ display_label }}" style="background:{{ bg }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
                   <div class="cell-inner">
-                    <div class="cell-line fw-bold">{{ cell_label }}</div>
+                    {% if cell_custom %}
+                      <div class="cell-line fw-bold">{{ cell_label }}</div>
+                    {% else %}
+                      {% for e in cell.entries %}
+                        <div class="cell-line">{{ e.text }}</div>
+                      {% endfor %}
+                    {% endif %}
                   </div>
                 </td>
               {% endif %}
