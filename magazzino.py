@@ -3511,6 +3511,21 @@ def labels_pdf():
 
         crop_marks(x, y, lab_w, lab_h)
 
+        pos_data = entry.get("position") or (None, None)
+        cab, slot = pos_data
+
+        # Se più articoli condividono il cassetto, stampo solo il nome configurato (senza colore né QR)
+        if entry.get("is_multi"):
+            col_code = getattr(slot, "col_code", "") or ""
+            row_num = getattr(slot, "row_num", None)
+            label_txt = slot_label(slot, for_display=False, fallback_col=col_code, fallback_row=row_num)
+            c.setFillColorRGB(0, 0, 0)
+            font_size = 14
+            c.setFont("Helvetica-Bold", font_size)
+            text_y = y + (lab_h / 2) + (font_size / 2)
+            c.drawCentredString(x + (lab_w / 2), text_y, label_txt or "")
+            continue
+
         # Barra colore categoria in alto
         try:
             colhex = entry.get("color") or "#000000"
@@ -3521,10 +3536,8 @@ def labels_pdf():
 
         c.setFillColorRGB(0, 0, 0)
 
-        pos_data = entry.get("position") or (None, None)
         pos_texts = None
         pos_block_w = base_pos_block_w
-        cab, slot = pos_data
         if cab or slot:
             col_code = getattr(slot, "col_code", "") or ""
             row_num = getattr(slot, "row_num", None)
@@ -3548,8 +3561,8 @@ def labels_pdf():
         cy = y + lab_h - max(padding_x, mm_to_pt(1.0))
 
         # --- Riga 1: Categoria + Sottotipo + Misura ---
-        base_lines = [] if entry.get("is_multi") else label_lines_for_item(item)
-        line1_text = entry.get("summary") if entry.get("is_multi") else (base_lines[0] if base_lines else "")
+        base_lines = label_lines_for_item(item)
+        line1_text = base_lines[0] if base_lines else ""
         if line1_text:
             line1_lines = wrap_to_lines(line1_text, cat_font, cat_size, text_right_limit, max_lines=1)
             if line1_lines:
@@ -3558,7 +3571,7 @@ def labels_pdf():
                 cy -= (cat_size + 0.6)
 
         # --- Riga 2: specifiche a seconda della categoria ---
-        line2_text = None if entry.get("is_multi") else (base_lines[1] if len(base_lines) > 1 else "")
+        line2_text = base_lines[1] if len(base_lines) > 1 else ""
         if line2_text:
             line2_lines = wrap_to_lines(line2_text, title_font, title_size, text_right_limit, max_lines=1)
             if line2_lines:
@@ -3568,7 +3581,7 @@ def labels_pdf():
 
         # Fallback: se per qualche motivo non abbiamo scritto nulla, uso il nome completo
         if not line1_text and not line2_text:
-            fallback = entry.get("summary") or item.name or auto_name_for(item)
+            fallback = item.name or auto_name_for(item)
             lines = wrap_to_lines(fallback, title_font, title_size, text_right_limit, max_lines=2)
             c.setFont(title_font, title_size)
             for ln in lines:
@@ -3643,7 +3656,7 @@ def cards_pdf():
                    .join(Cabinet, Slot.cabinet_id == Cabinet.id)
                    .filter(Assignment.item_id.in_(ids))
                    .all())
-    pos_by_item = {a.item_id: (cab, slot) for a, cab, slot in assignments}
+    pos_by_item = {item_id: (cab, slot) for item_id, cab, slot in assignments}
 
     page_size = portrait(A4)
     buf = io.BytesIO()
