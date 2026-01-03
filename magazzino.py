@@ -3552,16 +3552,24 @@ def labels_pdf():
 
         pos_texts = None
         pos_block_w = base_pos_block_w
+        pos_font_size = position_font_size
+        pos_line_height = position_line_height
+        custom_slot_label = False
         if cab or slot:
             col_code = getattr(slot, "col_code", "") or ""
             row_num = getattr(slot, "row_num", None)
             label_txt = slot_label(slot, for_display=False, fallback_col=col_code, fallback_row=row_num)
             if slot and slot.print_label_override:
-                pos_texts = (label_txt,)
+                custom_slot_label = True
+                pos_font_size = max(position_font_size - 0.5, 4.0)
+                pos_line_height = pos_font_size + 0.6
+                available_w = max(pos_block_w - mm_to_pt(1), mm_to_pt(6))
+                pos_texts = wrap_to_lines(label_txt, "Helvetica-Bold", pos_font_size, available_w, max_lines=2) or [label_txt]
+                max_width = max(pdfmetrics.stringWidth(txt, "Helvetica-Bold", pos_font_size) for txt in pos_texts)
+                pos_block_w = max(pos_block_w, max_width + mm_to_pt(1))
             elif row_num is not None and col_code:
                 pos_texts = (f"Rig: {int(row_num)}", f"Col: {col_code.upper()}")
-            if pos_texts:
-                required_w = max(pdfmetrics.stringWidth(txt, "Helvetica-Bold", position_font_size) for txt in pos_texts) + mm_to_pt(1)
+                required_w = max(pdfmetrics.stringWidth(txt, "Helvetica-Bold", pos_font_size) for txt in pos_texts) + mm_to_pt(1)
                 pos_block_w = max(pos_block_w, required_w)
 
         # area testuale a sinistra del blocco posizione/QR
@@ -3606,15 +3614,17 @@ def labels_pdf():
         if pos_texts:
             pos_x = x + lab_w - qr_area_width - pos_block_w
             if qr_box:
-                block_height = position_line_height * len(pos_texts)
-                start_y = y + qr_margin + max((qr_box - block_height) / 2, 0) + block_height - position_font_size
+                block_height = pos_line_height * len(pos_texts)
+                start_y = y + qr_margin + max((qr_box - block_height) / 2, 0) + block_height - pos_font_size
             else:
-                start_y = y + lab_h - padding_x - position_font_size
-            c.setFont("Helvetica-Bold", position_font_size)
+                start_y = y + lab_h - padding_x - pos_font_size
+            if custom_slot_label:
+                start_y -= mm_to_pt(0.5)
+            c.setFont("Helvetica-Bold", pos_font_size)
             line_y = start_y
             for txt in pos_texts:
                 c.drawString(pos_x, line_y, txt)
-                line_y -= position_line_height
+                line_y -= pos_line_height
 
         # QR a destra
         if qr_box:
