@@ -1595,11 +1595,12 @@ def _share_slot_status(existing_items: list[Item], new_item: Item):
         return True, []
     measure_new = _normalize_thread_size(getattr(new_item, "thread_size", None))
     category_new = getattr(new_item, "category_id", None)
-    for it in existing_items:
-        if getattr(it, "category_id", None) != category_new:
-            return False, []
-        if _normalize_thread_size(getattr(it, "thread_size", None)) != measure_new:
-            return False, []
+    measures_ok = all(_normalize_thread_size(getattr(it, "thread_size", None)) == measure_new for it in existing_items)
+    categories_ok = all(getattr(it, "category_id", None) == category_new for it in existing_items)
+    # Permetti la condivisione se categoria e misura coincidono (comportamento precedente)
+    # oppure se tutti condividono la stessa misura (es. M10) anche con categorie diverse.
+    if not ((categories_ok and measures_ok) or (measure_new and measures_ok)):
+        return False, []
     blockers = [it for it in existing_items if not getattr(it, "share_drawer", False)]
     if not getattr(new_item, "share_drawer", False):
         blockers.append(new_item)
