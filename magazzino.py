@@ -358,6 +358,35 @@ def _max_compartments_for_slot(cabinet: Cabinet | None, col_code: str, row_num: 
     multiplier = _merged_cell_multiplier(cabinet, col_code, row_num)
     return max(1, int(base)) * max(1, multiplier)
 
+
+def _collect_region_assignments(cabinet_id: int, col_code: str, row_num: int, *, ignore_item_id: int | None = None):
+    """
+    Raccoglie slot e assegnamenti per la cella indicata, includendo tutte le celle fuse.
+    Restituisce (anchor_slot, all_slots, assignments, items).
+    """
+    region = merge_region_for(cabinet_id, col_code, row_num)
+    anchor_col = col_code
+    anchor_row = row_num
+    cells = [(col_code, row_num)]
+    if region:
+        anchor_col = region["anchor_col"]
+        anchor_row = region["anchor_row"]
+        cells = merge_cells_from_region(region)
+
+    # Assicura che esista lo slot anchor
+    anchor_slot = _ensure_slot(cabinet_id, anchor_col, anchor_row)
+    slots = []
+    assignments = []
+    items = []
+    for col, row in cells:
+        slot = _ensure_slot(cabinet_id, col, row)
+        slots.append(slot)
+        assigns, slot_items = _load_slot_assignments(slot.id, ignore_item_id=ignore_item_id)
+        assignments.extend(assigns)
+        items.extend(slot_items)
+
+    return anchor_slot, slots, assignments, items
+
 def make_full_position(cab_name: str, col_code: str, row_num: int) -> str:
     return f"{cab_name}-{col_code.upper()}{int(row_num)}"
 
@@ -1635,18 +1664,12 @@ def _can_share_slot(existing_items: list[Item], new_item: Item) -> bool:
 def _assign_position(item, cabinet_id:int, col_code:str, row_num:int, *, force_share: bool = False):
     if not column_code_valid(col_code):         raise ValueError("Colonna non valida (A..Z o AA..ZZ).")
     if not (1 <= int(row_num) <= 128):          raise ValueError("Riga non valida (1..128).")
-    merge_region = merge_region_for(cabinet_id, col_code, row_num)
-    if merge_region:
-        col_code = merge_region["anchor_col"]
-        row_num = merge_region["anchor_row"]
-    slot = Slot.query.filter_by(cabinet_id=cabinet_id, row_num=row_num, col_code=col_code.upper()).first()
-    if not slot:
-        slot = Slot(cabinet_id=cabinet_id, row_num=row_num, col_code=col_code.upper(), is_blocked=False)
-        db.session.add(slot); db.session.flush()
-    if slot.is_blocked:                         raise RuntimeError("La cella è bloccata (non assegnabile).")
-
+    anchor_slot, slots, assignments, slot_items = _collect_region_assignments(
+        cabinet_id, col_code, row_num, ignore_item_id=item.id
+    )
+    if anchor_slot.is_blocked:                         raise RuntimeError("La cella è bloccata (non assegnabile).")
     Assignment.query.filter_by(item_id=item.id).delete()
-    same_slot, slot_items = _load_slot_assignments(slot.id, ignore_item_id=item.id)
+
     can_share, blockers = _share_slot_status(slot_items, item)
     if not can_share:
         if blockers and force_share:
@@ -1658,13 +1681,15 @@ def _assign_position(item, cabinet_id:int, col_code:str, row_num:int, *, force_s
             raise RuntimeError("Il cassetto contiene articoli che non supportano la condivisione.")
 
     cab = db.session.get(Cabinet, int(cabinet_id))
-    max_comp = _max_compartments_for_slot(cab, col_code, row_num)
-    used = {a.compartment_no for a in same_slot}
-    comp_no = next((n for n in range(1, max_comp+1) if n not in used), None)
-    if comp_no is None:
+    max_comp = _max_compartments_for_slot(cab, anchor_slot.col_code, anchor_slot.row_num)
+    if len(assignments) >= max_comp:
         raise RuntimeError("Nessuno scomparto libero nello slot scelto.")
 
-    db.session.add(Assignment(slot_id=slot.id, compartment_no=comp_no, item_id=item.id))
+    # Sposta tutti gli assignment della regione nello slot anchor e riassegna i comparti.
+    for a in assignments:
+        a.slot_id = anchor_slot.id
+    db.session.add(Assignment(slot_id=anchor_slot.id, compartment_no=0, item_id=item.id))
+    _reassign_compartments(anchor_slot.id, cab)
 
 def _suggest_position(item: Item):
     rows = (
