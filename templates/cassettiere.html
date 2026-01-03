@@ -133,7 +133,7 @@
 </div>
 
 <!-- Modal contenuto cella -->
-<div class="modal fade" id="slotModal" tabindex="-1" aria-hidden="true">
+<div class="modal fade slot-modal" id="slotModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header">
@@ -313,10 +313,20 @@ function openSlotModal(col, row, labelText){
         const tr = document.createElement('tr');
 
         const tdName = document.createElement('td');
-        tdName.innerHTML = `<span class="badge-color" style="background:${it.color};"></span> ${it.name}`;
+        const measureInfo = (it.main_measure && it.main_measure.value)
+          ? `${it.main_measure.label || (it.main_measure.mode === 'thickness' ? 'Spessore' : 'Lunghezza')}: ${it.main_measure.value} mm`
+          : null;
+        tdName.innerHTML = `
+          <div class="d-flex align-items-start">
+            <span class="badge-color flex-shrink-0 mt-1" style="background:${it.color};"></span>
+            <div class="ms-2">
+              <div class="fw-semibold">${it.name}</div>
+              ${measureInfo ? `<div class="text-muted small">${measureInfo}</div>` : ''}
+            </div>
+          </div>`;
 
         const tdPos = document.createElement('td');
-        tdPos.textContent = it.position || '';
+        tdPos.textContent = it.position_code || it.position || '';
 
         const tdQty = document.createElement('td');
         tdQty.textContent = (it.quantity !== null && it.quantity !== undefined) ? it.quantity : '';
