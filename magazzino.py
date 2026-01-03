@@ -2699,6 +2699,11 @@ def slot_items():
     if not slots:
         return jsonify({"ok": True, "items": []})
 
+    default_label = f"{col_code}{row_num}"
+    anchor_slot = next((s for s in slots if s.col_code == col_code and s.row_num == row_num), slots[0])
+    label_display = slot_label(anchor_slot, for_display=True, fallback_col=col_code, fallback_row=row_num)
+    label_print = slot_label(anchor_slot, for_display=False, fallback_col=col_code, fallback_row=row_num)
+
     slot_ids = [s.id for s in slots]
     assigns = (
         db.session.query(Assignment, Item, Category, Slot)
