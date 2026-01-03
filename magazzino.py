@@ -2734,6 +2734,8 @@ def slot_items():
             "category": cat.name if cat else None,
             "color": cat.color if cat else "#999999",
             "position": slot_label(slot, for_display=True, fallback_col=slot.col_code, fallback_row=slot.row_num),
+            "position_code": f"{slot.col_code}{slot.row_num}",
+            "main_measure": main_measure_info(it),
         })
     return jsonify({
         "ok": True,
