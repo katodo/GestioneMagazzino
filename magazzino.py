@@ -3300,7 +3300,7 @@ def labels_pdf():
                    .join(Cabinet, Slot.cabinet_id == Cabinet.id)
                    .filter(Assignment.item_id.in_(ids))
                    .all())
-    pos_by_item = {item_id: (cab, slot) for item_id, cab, slot in assignments}
+    pos_by_item = {a.item_id: (cab, slot) for a, cab, slot in assignments}
     original_order = {item.id: idx for idx, item in enumerate(items)}
 
     slot_ids = {slot.id for _, slot in pos_by_item.values() if slot and slot.id}

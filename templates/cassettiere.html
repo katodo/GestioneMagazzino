@@ -53,31 +53,24 @@
             {% set merge = grid.merge_anchors.get(key) if grid.merge_anchors else None %}
             {% set cell_label = cell.label if cell and cell.label else col ~ r %}
             {% if not cell %}
-                <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="" data-label="{{ cell_label }}">
-                  <div class="cell-inner" style="color:#777; text-shadow:none; font-weight:500;">
-                    <div class="cell-tag">{{ cell_label }}</div>
-                    &nbsp;
+              <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="" data-label="{{ cell_label }}">
+                <div class="cell-inner" style="color:#777; text-shadow:none; font-weight:500;">&nbsp;</div>
+              </td>
+            {% else %}
+              {% if cell.blocked %}
+                <td class="cell-blocked" data-col="{{ col }}" data-row="{{ r }}" data-cat="blocked" data-label="{{ cell_label }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>—</td>
+              {% elif cell.entries and (cell.entries|length)>0 %}
+                {% set colhex = cell.entries[0].color %}
+                <td class="cell-used" style="background: {{ colhex }}" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" data-label="{{ cell_label }}" data-items='{{ cell.entries|tojson }}' {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
+                  <div class="cell-inner">
+                    {% for entry in cell.entries %}
+                      <div class="cell-line">{{ entry.text }}</div>
+                    {% endfor %}
                   </div>
                 </td>
               {% else %}
-                {% if cell.blocked %}
-                  <td class="cell-blocked" data-col="{{ col }}" data-row="{{ r }}" data-cat="blocked" data-label="{{ cell_label }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>—</td>
-                {% elif cell.entries and (cell.entries|length)>0 %}
-                  {% set colhex = cell.entries[0].color %}
-                  <td class="cell-used" style="background: {{ colhex }}" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" data-label="{{ cell_label }}" data-items='{{ cell.entries|tojson }}' {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
-                    <div class="cell-inner">
-                      <div class="cell-tag">{{ cell_label }}</div>
-                      {% for entry in cell.entries %}
-                        <div class="cell-line">{{ entry.text }}</div>
-                      {% endfor %}
-                    </div>
-                  </td>
-                {% else %}
                 <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="" data-label="{{ cell_label }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
-                  <div class="cell-inner" style="color:#777; text-shadow:none; font-weight:500;">
-                    <div class="cell-tag">{{ cell_label }}</div>
-                    &nbsp;
-                  </div>
+                  <div class="cell-inner" style="color:#777; text-shadow:none; font-weight:500;">&nbsp;</div>
                 </td>
                 {% endif %}
               {% endif %}
