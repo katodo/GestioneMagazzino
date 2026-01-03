@@ -338,6 +338,26 @@ def merge_cells_from_region(region):
             cells.append((idx_to_colcode(col_idx), row))
     return cells
 
+
+def _merged_cell_multiplier(cabinet: Cabinet | None, col_code: str, row_num: int) -> int:
+    if not cabinet:
+        return 1
+    region = merge_region_for(cabinet.id, col_code, row_num)
+    if not region:
+        return 1
+    start_idx = colcode_to_idx(region["col_start"])
+    end_idx = colcode_to_idx(region["col_end"])
+    cols = max(1, end_idx - start_idx + 1)
+    rows = max(1, region["row_end"] - region["row_start"] + 1)
+    return cols * rows
+
+
+def _max_compartments_for_slot(cabinet: Cabinet | None, col_code: str, row_num: int) -> int:
+    base = cabinet.compartments_per_slot if cabinet else None
+    base = base or 6
+    multiplier = _merged_cell_multiplier(cabinet, col_code, row_num)
+    return max(1, int(base)) * max(1, multiplier)
+
 def make_full_position(cab_name: str, col_code: str, row_num: int) -> str:
     return f"{cab_name}-{col_code.upper()}{int(row_num)}"
 
@@ -1638,7 +1658,7 @@ def _assign_position(item, cabinet_id:int, col_code:str, row_num:int, *, force_s
             raise RuntimeError("Il cassetto contiene articoli che non supportano la condivisione.")
 
     cab = db.session.get(Cabinet, int(cabinet_id))
-    max_comp = cab.compartments_per_slot if cab else 6
+    max_comp = _max_compartments_for_slot(cab, col_code, row_num)
     used = {a.compartment_no for a in same_slot}
     comp_no = next((n for n in range(1, max_comp+1) if n not in used), None)
     if comp_no is None:
@@ -1668,7 +1688,8 @@ def _suggest_position(item: Item):
         _, slot_items = _load_slot_assignments(slot.id)
         if not _can_share_slot(slot_items, item):
             continue
-        if assign_count < (cab.compartments_per_slot or 6):
+        max_comp = _max_compartments_for_slot(cab, slot.col_code, slot.row_num)
+        if assign_count < max_comp:
             return cab.id, slot.col_code, slot.row_num
     return None
 
@@ -1795,7 +1816,7 @@ def move_item_slot(item_id):
     if not cab_to_obj:
         flash("Cassettiera destinazione non trovata.", "danger")
         return redirect(url_for("edit_item", item_id=item.id))
-    if not _slot_capacity_ok(cab_to_obj, len(dst_assigns) + len(src_assigns)):
+    if not _slot_capacity_ok(cab_to_obj, len(dst_assigns) + len(src_assigns), dst_slot.col_code, dst_slot.row_num):
         flash("Scomparti insufficienti nel cassetto destinazione.", "danger")
         return redirect(url_for("edit_item", item_id=item.id))
 
@@ -2390,12 +2411,14 @@ def _slot_categories(slot_id:int) -> set:
     )
     return {cat_id for (cat_id,) in rows if cat_id}
 
-def _slot_capacity_ok(cabinet:Cabinet, assigns_count:int) -> bool:
-    return assigns_count <= (cabinet.compartments_per_slot or 6)
+def _slot_capacity_ok(cabinet:Cabinet, assigns_count:int, col_code:str, row_num:int) -> bool:
+    max_comp = _max_compartments_for_slot(cabinet, col_code, row_num)
+    return assigns_count <= max_comp
 
 def _reassign_compartments(slot_id:int, cabinet:Cabinet):
     assigns = Assignment.query.filter_by(slot_id=slot_id).order_by(Assignment.id).all()
-    max_comp = cabinet.compartments_per_slot or 6
+    slot = db.session.get(Slot, slot_id)
+    max_comp = _max_compartments_for_slot(cabinet, slot.col_code, slot.row_num)
     n = 1
     for a in assigns:
         if n>max_comp: raise RuntimeError("Capienza scomparti superata.")
@@ -2483,13 +2506,16 @@ def move_slot():
     cab_from_obj = db.session.get(Cabinet, cab_from)
 
     if not do_swap:
-        if not _slot_capacity_ok(cab_to_obj, len(dst_assigns)+len(src_assigns)):
+        if not _slot_capacity_ok(cab_to_obj, len(dst_assigns)+len(src_assigns), dst.col_code, dst.row_num):
             return _flash_back("Scomparti insufficienti nel cassetto destinazione.", "danger", "admin_config")
         for a in src_assigns: a.slot_id = dst.id
         _reassign_compartments(dst.id, cab_to_obj)
         db.session.commit(); flash("Cassetto spostato.", "success")
     else:
-        if not _slot_capacity_ok(cab_to_obj, len(dst_assigns)+len(src_assigns)) or not _slot_capacity_ok(cab_from_obj, len(src_assigns)+len(dst_assigns)):
+        if (
+            not _slot_capacity_ok(cab_to_obj, len(dst_assigns)+len(src_assigns), dst.col_code, dst.row_num)
+            or not _slot_capacity_ok(cab_from_obj, len(src_assigns)+len(dst_assigns), src.col_code, src.row_num)
+        ):
             return _flash_back("Scomparti insufficienti per lo scambio.", "danger", "admin_config")
         for a in src_assigns: a.slot_id = dst.id
         for a in dst_assigns: a.slot_id = src.id
@@ -2711,7 +2737,6 @@ def _auto_assign_category(category_id: int,
     reused_slots = set()       # celle che verranno liberate e riutilizzate (clear_occupied=True)
     planned_items = {}         # key -> lista di Item (esistenti + pianificati) per compatibilità
     slot_plan = []             # lista ordinata di slot percorsi con capacità residua e contenuto
-    max_comp = cab.compartments_per_slot or 6
 
     for col_code, row_num in _iter_cabinet_walk(cab, start_col, start_row, direction):
         slot = Slot.query.filter_by(cabinet_id=cab.id, col_code=col_code, row_num=row_num).first()
@@ -2730,7 +2755,8 @@ def _auto_assign_category(category_id: int,
         else:
             existing_count = len(assigns)
 
-        free_here = max_comp - existing_count
+        max_here = _max_compartments_for_slot(cab, col_code, row_num)
+        free_here = max_here - existing_count
         if free_here <= 0:
             if has_content and not clear_occupied:
                 skipped_occupied.add(slot_key)
