@@ -188,6 +188,8 @@ class Slot(db.Model):
     row_num = db.Column(db.Integer, nullable=False)         # 1..128
     col_code = db.Column(db.String(2), nullable=False)      # A..Z, AA..ZZ
     is_blocked = db.Column(db.Boolean, nullable=False, default=False)
+    display_label_override = db.Column(db.String(80), nullable=True)
+    print_label_override = db.Column(db.String(80), nullable=True)
     __table_args__ = (
         db.UniqueConstraint('cabinet_id', 'row_num', 'col_code', name='uq_slot_in_cabinet'),
         db.Index("ix_slot_cabinet_row_col", "cabinet_id", "row_num", "col_code"),
@@ -387,8 +389,31 @@ def _collect_region_assignments(cabinet_id: int, col_code: str, row_num: int, *,
 
     return anchor_slot, slots, assignments, items
 
-def make_full_position(cab_name: str, col_code: str, row_num: int) -> str:
-    return f"{cab_name}-{col_code.upper()}{int(row_num)}"
+def make_full_position(cab_name: str, col_code: str, row_num: int, label_override: str | None = None) -> str:
+    base_label = (label_override or f"{col_code.upper()}{int(row_num)}").strip()
+    return f"{cab_name}-{base_label}" if cab_name else base_label
+
+def slot_label(slot: Slot | None, *, for_display: bool = True, fallback_col: str | None = None, fallback_row: int | None = None) -> str:
+    if slot:
+        override = slot.display_label_override if for_display else slot.print_label_override
+        col = slot.col_code
+        row = slot.row_num
+    else:
+        override = None
+        col = fallback_col
+        row = fallback_row
+    base = f"{(col or '').upper()}{int(row) if row is not None else ''}".strip()
+    if override:
+        cleaned = override.strip()
+        if cleaned:
+            return cleaned
+    return base
+
+def slot_full_label(cabinet: Cabinet | None, slot: Slot | None, *, for_print: bool = False, fallback_col: str | None = None, fallback_row: int | None = None) -> str:
+    base = slot_label(slot, for_display=not for_print, fallback_col=fallback_col, fallback_row=fallback_row)
+    if cabinet and cabinet.name:
+        return f"{cabinet.name}-{base}"
+    return base
 
 CATEGORY_ROLE_ALIASES = {
     "washer": ["rondelle"],
@@ -675,6 +700,30 @@ def ensure_mqtt_settings_columns():
     if added:
         db.session.commit()
 
+def ensure_slot_columns():
+    """Aggiunge eventuali nuove colonne alla tabella slot (compatibilità DB esistenti)."""
+    try:
+        rows = db.session.execute(text("PRAGMA table_info(slot)")).fetchall()
+    except Exception:
+        return
+    existing_cols = {r[1] for r in rows}
+    new_cols = [
+        ("display_label_override", "VARCHAR(80)", None),
+        ("print_label_override", "VARCHAR(80)", None),
+    ]
+    added = False
+    for col_name, col_type, default_val in new_cols:
+        if col_name not in existing_cols:
+            try:
+                default_sql = f" DEFAULT '{default_val}'" if default_val is not None else ""
+                db.session.execute(text(f"ALTER TABLE slot ADD COLUMN {col_name} {col_type}{default_sql}"))
+                added = True
+            except Exception:
+                db.session.rollback()
+                return
+    if added:
+        db.session.commit()
+
 _schema_checked = False
 
 def ensure_core_schema():
@@ -686,6 +735,7 @@ def ensure_core_schema():
     ensure_item_columns()
     ensure_category_columns()
     ensure_mqtt_settings_columns()
+    ensure_slot_columns()
     _schema_checked = True
 
 @app.before_request
@@ -741,7 +791,13 @@ def get_mqtt_settings() -> MqttSettings:
 def mqtt_payload_for_slot(cabinet: Cabinet, col_code: str, row_num: int, settings: MqttSettings):
     if not cabinet:
         return None
+    region = merge_region_for(cabinet.id, col_code, row_num)
+    if region:
+        col_code = region["anchor_col"]
+        row_num = region["anchor_row"]
     location = Location.query.get(cabinet.location_id) if cabinet else None
+    slot_obj = Slot.query.filter_by(cabinet_id=cabinet.id, col_code=col_code, row_num=row_num).first()
+    slot_label_text = slot_label(slot_obj, for_display=True, fallback_col=col_code, fallback_row=row_num)
     payload = {
         "event": "slot_click",
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -759,7 +815,7 @@ def mqtt_payload_for_slot(cabinet: Cabinet, col_code: str, row_num: int, setting
     if settings.include_col:
         payload["col"] = col_code
     if settings.include_slot_label:
-        payload["slot"] = f"{col_code}{row_num}"
+        payload["slot"] = slot_label_text
 
     if settings.include_items:
         region = merge_region_for(cabinet.id, col_code, row_num)
@@ -800,7 +856,7 @@ def mqtt_payload_for_slot(cabinet: Cabinet, col_code: str, row_num: int, setting
                 if settings.include_item_quantity:
                     item_data["quantity"] = it.quantity
                 if settings.include_item_position:
-                    item_data["position"] = f"{slot.col_code}{slot.row_num}"
+                    item_data["position"] = slot_label(slot, for_display=True, fallback_col=slot.col_code, fallback_row=slot.row_num)
                 if settings.include_item_description:
                     item_data["description"] = it.description
                 if settings.include_item_material:
@@ -1141,12 +1197,15 @@ def _render_articles_page():
     measure_labels = build_measure_labels(categories)
 
     assignments = (
-        db.session.query(Assignment.item_id, Cabinet.name, Slot.col_code, Slot.row_num)
+        db.session.query(Assignment.item_id, Cabinet, Slot)
         .join(Slot, Assignment.slot_id == Slot.id)
         .join(Cabinet, Slot.cabinet_id == Cabinet.id)
         .all()
     )
-    pos_by_item = {a.item_id: make_full_position(a.name, a.col_code, a.row_num) for a in assignments}
+    pos_by_item = {
+        item_id: slot_full_label(cab, slot, for_print=False)
+        for item_id, cab, slot in assignments
+    }
 
     thread_standards, sizes_by_standard = load_form_options()
     default_standard_code = next(
@@ -1237,6 +1296,10 @@ def build_full_grid(cabinet_id:int):
         .filter(Slot.cabinet_id == cabinet_id)
         .all()
     )
+    slot_display_labels = {
+        f"{s.col_code}-{s.row_num}": slot_label(s, for_display=True)
+        for s in slot_rows
+    }
 
     assigns = (
         db.session.query(Assignment, Slot, Item, Category)
@@ -1251,11 +1314,17 @@ def build_full_grid(cabinet_id:int):
     for s in slot_rows:
         if s.is_blocked:
             key = f"{s.col_code}-{s.row_num}"
-            cells[key] = {"blocked": True, "entries": [], "cat_id": None}
+            cells[key] = {
+                "blocked": True,
+                "entries": [],
+                "cat_id": None,
+                "label": slot_display_labels.get(key) or f"{s.col_code}{s.row_num}",
+            }
 
     for a, s, it, cat in assigns:
         key = f"{s.col_code}-{s.row_num}"
-        cell = cells.get(key, {"blocked": False, "entries": [], "cat_id": None})
+        label = slot_display_labels.get(key) or f"{s.col_code}{s.row_num}"
+        cell = cells.get(key, {"blocked": False, "entries": [], "cat_id": None, "label": label})
         text = short_cell_text(it)
         summary = text.replace("\n", " - ")
         color = cat.color if cat else "#999"
@@ -1266,16 +1335,23 @@ def build_full_grid(cabinet_id:int):
             "description": it.description,
             "quantity": it.quantity,
             "share_drawer": bool(getattr(it, "share_drawer", False)),
-            "position": f"{s.col_code}{s.row_num}",
+            "position": label,
             "thread_size": it.thread_size,
             "main_measure": main_measure_info(it),
         })
         if cell["cat_id"] is None and it.category_id:
             cell["cat_id"] = it.category_id
+        if not cell.get("label"):
+            cell["label"] = label
         cells[key] = cell
 
     for anchor_key, region in merge_regions.items():
-        merged_cell = {"blocked": False, "entries": [], "cat_id": None}
+        merged_cell = {
+            "blocked": False,
+            "entries": [],
+            "cat_id": None,
+            "label": slot_display_labels.get(anchor_key) or f"{region['col_start']}{region['row_start']}",
+        }
         for col, row in merge_cells_from_region(region):
             key = f"{col}-{row}"
             cell = cells.get(key)
@@ -1344,7 +1420,7 @@ def api_item(item_id):
          .join(Slot, Assignment.slot_id == Slot.id)
          .join(Cabinet, Slot.cabinet_id == Cabinet.id)
          .filter(Assignment.item_id == item.id).first())
-    full_pos = make_full_position(a[2].name, a[1].col_code, a[1].row_num) if a else None
+    full_pos = slot_full_label(a[2], a[1], for_print=False) if a else None
     return jsonify({
         "id": item.id,
         "name": auto_name_for(item),
@@ -1386,8 +1462,15 @@ def api_slot_lookup():
         ]))
         .all()
     )
-    if not slots:
-        return jsonify({"ok": True, "items": []})
+    default_label = f"{col_code}{row_num}"
+    label_display = default_label
+    label_print = default_label
+    if slots:
+        anchor_slot = next((s for s in slots if s.col_code == col_code and s.row_num == row_num), slots[0])
+        label_display = slot_label(anchor_slot, for_display=True, fallback_col=col_code, fallback_row=row_num)
+        label_print = slot_label(anchor_slot, for_display=False, fallback_col=col_code, fallback_row=row_num)
+    else:
+        return jsonify({"ok": True, "items": [], "slot_label_display": default_label, "slot_label_print": default_label, "default_label": default_label})
 
     slot_ids = [s.id for s in slots]
     assigns = (
@@ -1406,7 +1489,7 @@ def api_slot_lookup():
             "name": auto_name_for(it),
             "category": cat.name if cat else None,
             "color": cat.color if cat else "#999999",
-            "position": f"{slot.col_code}{slot.row_num}",
+            "position": slot_label(slot, for_display=True, fallback_col=slot.col_code, fallback_row=slot.row_num),
         })
     return jsonify({"ok": True, "items": items})
 
@@ -1427,12 +1510,15 @@ def export_items_csv():
     ).order_by(Item.id).all()
 
     assignments = (
-        db.session.query(Assignment.item_id, Cabinet.name, Slot.col_code, Slot.row_num)
+        db.session.query(Assignment.item_id, Cabinet, Slot)
         .join(Slot, Assignment.slot_id == Slot.id)
         .join(Cabinet, Slot.cabinet_id == Cabinet.id)
         .all()
     )
-    pos_by_item = {a.item_id: make_full_position(a.name, a.col_code, a.row_num) for a in assignments}
+    pos_by_item = {
+        item_id: slot_full_label(cab, slot, for_print=False)
+        for item_id, cab, slot in assignments
+    }
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -2613,6 +2699,11 @@ def slot_items():
     if not slots:
         return jsonify({"ok": True, "items": []})
 
+    default_label = f"{col_code}{row_num}"
+    anchor_slot = next((s for s in slots if s.col_code == col_code and s.row_num == row_num), slots[0])
+    label_display = slot_label(anchor_slot, for_display=True, fallback_col=col_code, fallback_row=row_num)
+    label_print = slot_label(anchor_slot, for_display=False, fallback_col=col_code, fallback_row=row_num)
+
     slot_ids = [s.id for s in slots]
     assigns = (
         db.session.query(Assignment, Item, Category, Slot)
@@ -2632,9 +2723,54 @@ def slot_items():
             "quantity": it.quantity,
             "category": cat.name if cat else None,
             "color": cat.color if cat else "#999999",
-            "position": f"{slot.col_code}{slot.row_num}",
+            "position": slot_label(slot, for_display=True, fallback_col=slot.col_code, fallback_row=slot.row_num),
         })
-    return jsonify({"ok": True, "items": items})
+    return jsonify({
+        "ok": True,
+        "items": items,
+        "slot_label_display": label_display,
+        "slot_label_print": label_print,
+        "default_label": default_label,
+    })
+
+@app.route("/admin/slot_label", methods=["GET", "POST"])
+@login_required
+def slot_label_endpoint():
+    cab_id = request.values.get("cabinet_id", type=int)
+    col_code = (request.values.get("col_code") or "").strip().upper()
+    row_num = request.values.get("row_num", type=int)
+    if not (cab_id and col_code and row_num):
+        return jsonify({"ok": False, "error": "Parametri mancanti."}), 400
+    cabinet = Cabinet.query.get(cab_id)
+    if not cabinet:
+        return jsonify({"ok": False, "error": "Cassettiera non trovata."}), 404
+    region = merge_region_for(cabinet.id, col_code, row_num)
+    if region:
+        col_code = region["anchor_col"]
+        row_num = region["anchor_row"]
+    try:
+        slot = _ensure_slot(cabinet.id, col_code, int(row_num))
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+    if request.method == "POST":
+        display_label = (request.form.get("display_label") or "").strip()
+        print_label = (request.form.get("print_label") or "").strip()
+        slot.display_label_override = display_label or None
+        slot.print_label_override = print_label or None
+        db.session.commit()
+
+    default_label = f"{slot.col_code}{slot.row_num}"
+    return jsonify({
+        "ok": True,
+        "display_label": slot.display_label_override,
+        "print_label": slot.print_label_override,
+        "default_label": default_label,
+        "effective_display_label": slot_label(slot, for_display=True, fallback_col=slot.col_code, fallback_row=slot.row_num),
+        "effective_print_label": slot_label(slot, for_display=False, fallback_col=slot.col_code, fallback_row=slot.row_num),
+        "cabinet_name": cabinet.name,
+    })
 
 @app.route("/admin/mqtt/publish_slot", methods=["POST"])
 @login_required
@@ -3159,15 +3295,15 @@ def labels_pdf():
     if not items:
         flash("Nessun articolo valido per la stampa.", "warning"); return redirect(request.referrer or url_for("admin_items"))
 
-    assignments = (db.session.query(Assignment.item_id, Cabinet.name, Slot.col_code, Slot.row_num, Slot.id)
+    assignments = (db.session.query(Assignment.item_id, Cabinet, Slot)
                    .join(Slot, Assignment.slot_id == Slot.id)
                    .join(Cabinet, Slot.cabinet_id == Cabinet.id)
                    .filter(Assignment.item_id.in_(ids))
                    .all())
-    pos_by_item = {a.item_id: (a.name, a.col_code, a.row_num, a.id) for a in assignments}
+    pos_by_item = {a.item_id: (cab, slot) for a, cab, slot in assignments}
     original_order = {item.id: idx for idx, item in enumerate(items)}
 
-    slot_ids = {pos[3] for pos in pos_by_item.values() if len(pos) >= 4 and pos[3]}
+    slot_ids = {slot.id for _, slot in pos_by_item.values() if slot and slot.id}
     slot_contents = {}
     if slot_ids:
         rows = (
@@ -3179,16 +3315,17 @@ def labels_pdf():
             .all()
         )
         for it, slot, cab in rows:
-            key = (cab.name, slot.col_code, slot.row_num)
+            key = slot.id
             slot_contents.setdefault(key, []).append(it)
 
     def _label_sort_key(entry):
         items_in_entry = entry.get("items", [])
-        pos = entry.get("position")
+        cab, slot = entry.get("position") or (None, None)
         base_order = min((original_order.get(it.id, 0) for it in items_in_entry), default=0)
-        if pos:
-            cab_name, col_code, row_num = pos
-            return (0, cab_name or "", int(row_num), colcode_to_idx(col_code), base_order)
+        if cab and slot:
+            col_code = getattr(slot, "col_code", "") or ""
+            row_num = getattr(slot, "row_num", 0) or 0
+            return (0, cab.name or "", int(row_num), colcode_to_idx(col_code), base_order)
         return (1, base_order)
 
     def _common_parts(items_list: list[Item]) -> list[str]:
@@ -3327,22 +3464,26 @@ def labels_pdf():
     for item in items:
         pos_data = pos_by_item.get(item.id)
         if pos_data:
-            key = (pos_data[0], pos_data[1], pos_data[2])
-            if key in seen_slot_keys:
+            cab, slot = pos_data
+            slot_key = slot.id if slot else None
+            if slot_key and slot_key in seen_slot_keys:
                 continue
-            seen_slot_keys.add(key)
-            slot_items = slot_contents.get(key, [item])
+            if slot_key:
+                seen_slot_keys.add(slot_key)
+            slot_items = slot_contents.get(slot_key, [item])
             slot_items.sort(key=lambda it: original_order.get(it.id, 10**6))
             label_entries.append({
                 "items": slot_items,
-                "position": key,
+                "position": (cab, slot),
+                "slot_id": slot_key,
                 "is_multi": len(slot_items) > 1,
                 "color": slot_items[0].category.color if slot_items and slot_items[0].category else "#000000",
             })
         else:
             label_entries.append({
                 "items": [item],
-                "position": None,
+                "position": (None, None),
+                "slot_id": None,
                 "is_multi": False,
                 "color": item.category.color if item.category else "#000000",
             })
@@ -3380,14 +3521,21 @@ def labels_pdf():
 
         c.setFillColorRGB(0, 0, 0)
 
-        pos_data = entry.get("position")
+        pos_data = entry.get("position") or (None, None)
         pos_texts = None
         pos_block_w = base_pos_block_w
-        if pos_data:
-            _, col_code, row_num = pos_data
-            pos_texts = (f"Rig: {int(row_num)}", f"Col: {col_code.upper()}")
-            required_w = max(pdfmetrics.stringWidth(txt, "Helvetica-Bold", position_font_size) for txt in pos_texts) + mm_to_pt(1)
-            pos_block_w = max(pos_block_w, required_w)
+        cab, slot = pos_data
+        if cab or slot:
+            col_code = getattr(slot, "col_code", "") or ""
+            row_num = getattr(slot, "row_num", None)
+            label_txt = slot_label(slot, for_display=False, fallback_col=col_code, fallback_row=row_num)
+            if slot and slot.print_label_override:
+                pos_texts = (label_txt,)
+            elif row_num is not None and col_code:
+                pos_texts = (f"Rig: {int(row_num)}", f"Col: {col_code.upper()}")
+            if pos_texts:
+                required_w = max(pdfmetrics.stringWidth(txt, "Helvetica-Bold", position_font_size) for txt in pos_texts) + mm_to_pt(1)
+                pos_block_w = max(pos_block_w, required_w)
 
         # area testuale a sinistra del blocco posizione/QR
         text_right_limit = lab_w - qr_area_width - pos_block_w - padding_x
@@ -3490,12 +3638,12 @@ def cards_pdf():
         flash("Nessun articolo valido per la stampa.", "warning")
         return redirect(request.referrer or url_for("admin_items"))
 
-    assignments = (db.session.query(Assignment.item_id, Cabinet.name, Slot.col_code, Slot.row_num)
+    assignments = (db.session.query(Assignment.item_id, Cabinet, Slot)
                    .join(Slot, Assignment.slot_id == Slot.id)
                    .join(Cabinet, Slot.cabinet_id == Cabinet.id)
                    .filter(Assignment.item_id.in_(ids))
                    .all())
-    pos_by_item = {a.item_id: (a.name, a.col_code, a.row_num) for a in assignments}
+    pos_by_item = {a.item_id: (cab, slot) for a, cab, slot in assignments}
 
     page_size = portrait(A4)
     buf = io.BytesIO()
@@ -3598,9 +3746,9 @@ def cards_pdf():
 
         pos_data = pos_by_item.get(item.id)
         if pos_data:
-            cab, col_code, row_num = pos_data
+            cab, slot = pos_data
             cy -= 12
-            c.drawString(x + padding, cy, f"Posizione: {cab} {col_code}{row_num}")
+            c.drawString(x + padding, cy, f"Posizione: {slot_full_label(cab, slot, for_print=True)}")
 
     c.save()
     buf.seek(0)
@@ -3611,6 +3759,7 @@ def seed_if_empty_or_missing():
     ensure_settings_columns()
     ensure_item_columns()
     ensure_category_columns()
+    ensure_slot_columns()
     if not User.query.filter_by(username="admin").first():
         db.session.add(User(username="admin", password="admin"))
     if not Settings.query.get(1):
