@@ -6,6 +6,7 @@ from sqlalchemy import func, select, or_, text
 from sqlalchemy.orm import selectinload
 from datetime import datetime, timezone
 from typing import Optional
+from itertools import islice
 import json
 import os, io, csv
 
@@ -3018,7 +3019,14 @@ def _auto_assign_category(category_id: int,
     }
 
 
-def _deallocate_category_from_cabinet(category_id: int, cabinet_id: int):
+def _deallocate_category_from_cabinet(
+    category_id: int,
+    cabinet_id: int,
+    start_col: str | None = None,
+    start_row: int | None = None,
+    direction: str | None = None,
+    cells_count: int | None = None,
+):
     cab = db.session.get(Cabinet, int(cabinet_id))
     if not cab:
         raise ValueError("Cassettiera inesistente.")
@@ -3027,11 +3035,28 @@ def _deallocate_category_from_cabinet(category_id: int, cabinet_id: int):
     if not cat:
         raise ValueError("Categoria inesistente.")
 
+    slot_ids = None
+    scope = "all"
+    if start_col and start_row and cells_count and cells_count > 0:
+        scope = "range"
+        walk = _iter_cabinet_walk(cab, start_col, start_row, (direction or "H").upper())
+        coords = list(islice(walk, int(cells_count)))
+        if not coords:
+            raise ValueError("Nessuna cella valida nell'intervallo indicato.")
+        slot_map = {
+            (s.col_code, s.row_num): s.id
+            for s in Slot.query.filter_by(cabinet_id=cab.id).all()
+        }
+        slot_ids = [slot_map[(c, r)] for c, r in coords if (c, r) in slot_map]
+        if not slot_ids:
+            raise ValueError("Nessuna cella trovata nell'intervallo indicato.")
+
     assigns = (
         db.session.query(Assignment.id, Assignment.slot_id)
         .join(Item, Assignment.item_id == Item.id)
         .join(Slot, Assignment.slot_id == Slot.id)
         .filter(Item.category_id == int(category_id), Slot.cabinet_id == int(cabinet_id))
+        .filter(Assignment.slot_id.in_(slot_ids) if slot_ids else True)
         .all()
     )
 
@@ -3041,6 +3066,7 @@ def _deallocate_category_from_cabinet(category_id: int, cabinet_id: int):
             "slots": 0,
             "cabinet": cab.name,
             "category": cat.name,
+            "scope": scope,
         }
 
     assign_ids = [a.id for a in assigns]
@@ -3054,6 +3080,7 @@ def _deallocate_category_from_cabinet(category_id: int, cabinet_id: int):
         "slots": len(slot_ids),
         "cabinet": cab.name,
         "category": cat.name,
+        "scope": scope,
     }
 
 
@@ -3102,17 +3129,35 @@ def _placements_internal():
         start_row_raw  = form.get("start_row")
         start_row      = int(start_row_raw) if (start_row_raw not in (None, "")) else start_row
         clear_occupied = bool(form.get("clear_occupied"))
+        clear_scope    = (form.get("clear_scope") or "all").lower()
 
         if action == "clear_category":
             if not (form_cabinet_id and form_category_id):
                 flash("Seleziona cassettiera e categoria da de-allocare.", "danger")
             else:
                 try:
-                    res = _deallocate_category_from_cabinet(form_category_id, form_cabinet_id)
+                    range_params = {}
+                    if clear_scope == "range":
+                        if not (start_col and start_row):
+                            raise ValueError("Per de-allocare un intervallo seleziona colonna e riga di partenza.")
+                        if count_val <= 0:
+                            raise ValueError("Numero di celle da de-allocare non valido.")
+                        range_params = {
+                            "start_col": start_col,
+                            "start_row": start_row,
+                            "direction": direction,
+                            "cells_count": count_val,
+                        }
+                    res = _deallocate_category_from_cabinet(
+                        form_category_id,
+                        form_cabinet_id,
+                        **range_params,
+                    )
                     removed = res["removed"]
                     slots = res["slots"]
                     cat_name = res.get("category")
                     cab_name = res.get("cabinet")
+                    scope = res.get("scope") or "all"
                     if removed:
                         msg = (
                             f"De-allocati {removed} articoli della categoria \"{cat_name}\" "
@@ -3120,6 +3165,8 @@ def _placements_internal():
                         )
                         if slots:
                             msg += f" Cassetti liberati: {slots}."
+                        if scope == "range":
+                            msg += " Intervallo: sono state considerate solo le celle indicate."
                         msg += " Dovrai ristampare le etichette e riposizionare i cassetti."
                         flash(msg, "warning")
                     else:

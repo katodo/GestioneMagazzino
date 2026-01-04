@@ -7,6 +7,7 @@
 <div class="form-section mb-3">
   <form method="post" id="autoAssignForm" action="{{ url_for('placements') }}">
     <input type="hidden" name="action" id="formAction" value="auto_assign">
+    <input type="hidden" name="clear_scope" id="clearScope" value="all">
     <div class="row g-2">
       <div class="col-md-3">
         <label class="form-label">Cassettiera</label>
@@ -264,10 +265,22 @@ document.addEventListener('DOMContentLoaded', function(){
       e.preventDefault();
       const form = document.getElementById('autoAssignForm');
       if (!form) return;
-      const firstConfirm = confirm('Confermi di voler de-allocare TUTTA la categoria dalla cassettiera selezionata?');
+      const startCol = (document.getElementById('start_col')?.value || '').trim();
+      const startRow = (document.getElementById('start_row')?.value || '').trim();
+      const countVal = parseInt(document.getElementById('countInput')?.value || '0', 10);
+      let scope = 'all';
+      if (startCol && startRow && countVal > 0) {
+        const useRange = confirm(`Vuoi de-allocare solo l'intervallo di ${countVal} celle a partire da ${startCol}${startRow}? OK per l'intervallo, Annulla per l'intera categoria.`);
+        scope = useRange ? 'range' : 'all';
+      }
+      const firstConfirmMsg = scope === 'range'
+        ? 'Confermi di voler de-allocare la categoria solo nell\\'intervallo selezionato?'
+        : 'Confermi di voler de-allocare TUTTA la categoria dalla cassettiera selezionata?';
+      const firstConfirm = confirm(firstConfirmMsg);
       if (!firstConfirm) return;
       const secondConfirm = confirm('Operazione invasiva: sarà necessario ristampare tutte le etichette e riposizionare i cassetti. Procedere comunque?');
       if (!secondConfirm) return;
+      document.getElementById('clearScope').value = scope;
       document.getElementById('formAction').value = 'clear_category';
       form.submit();
     });
