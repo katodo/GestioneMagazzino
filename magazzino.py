@@ -3051,14 +3051,15 @@ def _deallocate_category_from_cabinet(
         if not slot_ids:
             raise ValueError("Nessuna cella trovata nell'intervallo indicato.")
 
-    assigns = (
+    assigns_query = (
         db.session.query(Assignment.id, Assignment.slot_id)
         .join(Item, Assignment.item_id == Item.id)
         .join(Slot, Assignment.slot_id == Slot.id)
         .filter(Item.category_id == int(category_id), Slot.cabinet_id == int(cabinet_id))
-        .filter(Assignment.slot_id.in_(slot_ids) if slot_ids else True)
-        .all()
     )
+    if slot_ids is not None:
+        assigns_query = assigns_query.filter(Assignment.slot_id.in_(slot_ids))
+    assigns = assigns_query.all()
 
     if not assigns:
         return {
