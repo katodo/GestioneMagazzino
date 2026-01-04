@@ -275,8 +275,8 @@ document.addEventListener('DOMContentLoaded', function(){
         scope = useRange ? 'range' : 'all';
       }
       const firstConfirmMsg = scope === 'range'
-        ? 'Confermi di voler de-allocare la categoria solo nell\\'intervallo selezionato?'
-        : 'Confermi di voler de-allocare TUTTA la categoria dalla cassettiera selezionata?';
+        ? "Confermi di voler de-allocare la categoria solo nell'intervallo selezionato?"
+        : "Confermi di voler de-allocare TUTTA la categoria dalla cassettiera selezionata?";
       const firstConfirm = confirm(firstConfirmMsg);
       if (!firstConfirm) return;
       const secondConfirm = confirm('Operazione invasiva: sarà necessario ristampare tutte le etichette e riposizionare i cassetti. Procedere comunque?');
