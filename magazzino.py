@@ -3531,15 +3531,51 @@ def labels_pdf():
             col_code = getattr(slot, "col_code", "") or ""
             row_num = getattr(slot, "row_num", None)
             label_txt = slot_label(slot, for_display=False, fallback_col=col_code, fallback_row=row_num) or ""
-            c.setFillColorRGB(0, 0, 0)
+            row_col_lines = []
+            if row_num is not None and col_code:
+                row_col_lines = [f"Rig: {int(row_num)}", f"Col: {col_code.upper()}"]
+
+            # Posizione (solo righe/colonne) su blocco a destra
+            pos_texts = row_col_lines or []
+            pos_font_size = position_font_size
+            pos_line_height = pos_font_size + 0.6
+            pos_block_w = base_pos_block_w if pos_texts else 0
+            if pos_texts:
+                required_w = max(pdfmetrics.stringWidth(txt, "Helvetica-Bold", pos_font_size) for txt in pos_texts) + mm_to_pt(1)
+                pos_block_w = max(pos_block_w, required_w)
+            pos_x = x + lab_w - pos_block_w - (padding_x if pos_block_w else 0)
+
+            # Testo centrale (Stampa etichette) adattato a due righe
+            text_area_w = lab_w - pos_block_w - (padding_x * 2 if pos_block_w else padding_x * 2)
+            text_left = x + padding_x
+            text_top_available = lab_h - padding_x * 2
             font_name = "Helvetica-Bold"
-            font_size = 14
+            font_size = min(12.0, (text_top_available / 2) - 0.2)
+            font_size = max(font_size, 6.0)
+            line_spacing = font_size + 0.6
+            lines = wrap_to_lines(label_txt, font_name, font_size, text_area_w, max_lines=2) or [label_txt]
+            while ((len(lines) * line_spacing) > text_top_available or any(pdfmetrics.stringWidth(l, font_name, font_size) > text_area_w for l in lines)) and font_size > 6.0:
+                font_size = max(font_size - 0.5, 6.0)
+                line_spacing = font_size + 0.6
+                lines = wrap_to_lines(label_txt, font_name, font_size, text_area_w, max_lines=2) or [label_txt]
+            total_height = (len(lines) - 1) * line_spacing + font_size
+            start_y = y + (lab_h / 2) + (total_height / 2) - font_size
+
+            c.setFillColorRGB(0, 0, 0)
             c.setFont(font_name, font_size)
-            ascent = pdfmetrics.getAscent(font_name) / 1000 * font_size
-            descent = abs(pdfmetrics.getDescent(font_name) / 1000 * font_size)
-            text_height = ascent + descent
-            text_y = y + (lab_h / 2) - (text_height / 2) + ascent
-            c.drawCentredString(x + (lab_w / 2), text_y, label_txt)
+            line_y = start_y
+            for ln in lines:
+                c.drawString(text_left, line_y, ln)
+                line_y -= line_spacing
+
+            if pos_texts:
+                c.setFont("Helvetica-Bold", pos_font_size)
+                block_height = pos_line_height * len(pos_texts)
+                pos_start_y = y + (lab_h / 2) + (block_height / 2) - pos_font_size
+                line_y = pos_start_y
+                for txt in pos_texts:
+                    c.drawString(pos_x, line_y, txt)
+                    line_y -= pos_line_height
             continue
 
         # Barra colore categoria in alto
@@ -3561,16 +3597,28 @@ def labels_pdf():
             col_code = getattr(slot, "col_code", "") or ""
             row_num = getattr(slot, "row_num", None)
             label_txt = slot_label(slot, for_display=False, fallback_col=col_code, fallback_row=row_num)
+            row_col_lines = []
+            if row_num is not None and col_code:
+                row_col_lines = [f"Rig: {int(row_num)}", f"Col: {col_code.upper()}"]
             if slot and slot.print_label_override:
                 custom_slot_label = True
-                pos_font_size = max(position_font_size - 0.5, 4.0)
-                pos_line_height = pos_font_size + 0.6
+                pos_font_size = max(position_font_size - 1.0, 4.0)
                 available_w = max(pos_block_w - mm_to_pt(1), mm_to_pt(6))
                 pos_texts = wrap_to_lines(label_txt, "Helvetica-Bold", pos_font_size, available_w, max_lines=2) or [label_txt]
-                max_width = max(pdfmetrics.stringWidth(txt, "Helvetica-Bold", pos_font_size) for txt in pos_texts)
-                pos_block_w = max(pos_block_w, max_width + mm_to_pt(1))
-            elif row_num is not None and col_code:
-                pos_texts = (f"Rig: {int(row_num)}", f"Col: {col_code.upper()}")
+                pos_line_height = pos_font_size + 0.6
+                combined_lines = list(pos_texts) + row_col_lines
+                available_h = qr_box if qr_box else lab_h - padding_x
+                while combined_lines and (pos_line_height * len(combined_lines)) > available_h and pos_font_size > 4.0:
+                    pos_font_size = max(pos_font_size - 0.4, 4.0)
+                    pos_line_height = pos_font_size + 0.6
+                    pos_texts = wrap_to_lines(label_txt, "Helvetica-Bold", pos_font_size, available_w, max_lines=2) or [label_txt]
+                    combined_lines = list(pos_texts) + row_col_lines
+                pos_texts = combined_lines or row_col_lines
+                if pos_texts:
+                    max_width = max(pdfmetrics.stringWidth(txt, "Helvetica-Bold", pos_font_size) for txt in pos_texts)
+                    pos_block_w = max(pos_block_w, max_width + mm_to_pt(1))
+            elif row_col_lines:
+                pos_texts = row_col_lines
                 required_w = max(pdfmetrics.stringWidth(txt, "Helvetica-Bold", pos_font_size) for txt in pos_texts) + mm_to_pt(1)
                 pos_block_w = max(pos_block_w, required_w)
 
