@@ -85,9 +85,9 @@
             </div>
           </div>
           <div class="col-lg-auto d-flex flex-wrap justify-content-lg-end gap-2">
-            <button type="button" class="btn btn-outline-warning" id="clearAreaBtn">De-alloca area</button>
-            <button type="button" class="btn btn-outline-danger" id="clearCategoryBtn">De-alloca categoria</button>
-            <button class="btn btn-primary">Assegna automaticamente</button>
+            <button type="submit" class="btn btn-outline-warning" id="clearAreaBtn" data-scope="range">De-alloca area</button>
+            <button type="submit" class="btn btn-outline-danger" id="clearCategoryBtn" data-scope="all">De-alloca categoria</button>
+            <button class="btn btn-primary" id="autoAssignBtn" type="submit">Assegna automaticamente</button>
           </div>
         </div>
       </div>
@@ -194,6 +194,13 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function(){
+  const form = document.getElementById('autoAssignForm');
+  const actionInput = document.getElementById('formAction');
+  const clearScopeInput = document.getElementById('clearScope');
+  const startColInput = document.getElementById('start_col');
+  const startRowInput = document.getElementById('start_row');
+  const autoAssignBtn = document.getElementById('autoAssignBtn');
+
   function escapeHtml(str){
     return (str || '').replace(/[&<>"']/g, function(m) {
       return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m] || m);
@@ -263,18 +270,17 @@ document.addEventListener('DOMContentLoaded', function(){
       const col = td.dataset.col;
       const row = td.dataset.row;
       if (!col || !row) return;
-      document.getElementById('start_col').value = col;
-      document.getElementById('start_row').value = row;
+      if (startColInput) startColInput.value = col;
+      if (startRowInput) startRowInput.value = row;
       grid.querySelectorAll('td').forEach(c => c.classList.remove('table-primary'));
       td.classList.add('table-primary');
     });
   }
 
-  function submitClear(scope) {
-    const form = document.getElementById('autoAssignForm');
-    if (!form) return false;
-    const startCol = (document.getElementById('start_col')?.value || '').trim();
-    const startRow = (document.getElementById('start_row')?.value || '').trim();
+  function submitClear(scope, btn) {
+    if (!form || !actionInput || !clearScopeInput) return false;
+    const startCol = (startColInput?.value || '').trim().toUpperCase();
+    const startRow = (startRowInput?.value || '').trim();
     const countVal = parseInt(document.getElementById('countInput')?.value || '0', 10);
     const direction = (document.querySelector('select[name=\"direction\"]')?.value || 'H').toUpperCase();
 
@@ -294,9 +300,15 @@ document.addEventListener('DOMContentLoaded', function(){
     const safetyConfirm = confirm('Operazione invasiva: sarà necessario ristampare tutte le etichette e riposizionare i cassetti. Procedere comunque?');
     if (!safetyConfirm) return false;
 
-    document.getElementById('clearScope').value = scope;
-    document.getElementById('formAction').value = 'clear_category';
-    form.submit();
+    clearScopeInput.value = scope;
+    actionInput.value = 'clear_category';
+    if (startColInput) startColInput.value = startCol;
+    if (startRowInput) startRowInput.value = startRow;
+    if (typeof form.requestSubmit === 'function') {
+      form.requestSubmit(btn || null);
+    } else {
+      form.submit();
+    }
     return true;
   }
 
@@ -304,7 +316,7 @@ document.addEventListener('DOMContentLoaded', function(){
   if (clearCategoryBtn) {
     clearCategoryBtn.addEventListener('click', function(e){
       e.preventDefault();
-      submitClear('all');
+      submitClear('all', clearCategoryBtn);
     });
   }
 
@@ -312,7 +324,34 @@ document.addEventListener('DOMContentLoaded', function(){
   if (clearAreaBtn) {
     clearAreaBtn.addEventListener('click', function(e){
       e.preventDefault();
-      submitClear('range');
+      submitClear('range', clearAreaBtn);
+    });
+  }
+
+  if (form) {
+    form.addEventListener('submit', function(ev){
+      const actionValue = actionInput?.value || 'auto_assign';
+      const scopeValue = clearScopeInput?.value || 'all';
+      if (actionValue === 'auto_assign') {
+        const colVal = (startColInput?.value || '').trim().toUpperCase();
+        const rowVal = (startRowInput?.value || '').trim();
+        if (!colVal || !rowVal) {
+          ev.preventDefault();
+          alert('Seleziona una cella di partenza cliccando sulla griglia o compilando i campi dedicati.');
+          return;
+        }
+        if (startColInput) startColInput.value = colVal;
+        if (startRowInput) startRowInput.value = rowVal;
+        if (clearScopeInput) clearScopeInput.value = scopeValue || 'all';
+      }
+      if (actionInput) actionInput.value = actionValue || 'auto_assign';
+    });
+  }
+
+  if (autoAssignBtn) {
+    autoAssignBtn.addEventListener('click', function(){
+      if (actionInput) actionInput.value = 'auto_assign';
+      if (clearScopeInput) clearScopeInput.value = 'all';
     });
   }
 
