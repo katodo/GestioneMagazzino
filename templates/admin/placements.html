@@ -73,12 +73,22 @@
           </label>
         </div>
       </div>
-      <div class="col-12 d-flex justify-content-between align-items-center">
-        <div class="text-muted small">La de-allocazione di una categoria comporta la ristampa di tutte le etichette e il riposizionamento dei cassetti.</div>
-        <div class="text-end">
-          <div class="small text-muted text-end mb-1">Imposta colonna, riga, direzione e numero per limitare l'intervallo; lascia vuoto per tutta la categoria.</div>
-          <button type="button" class="btn btn-outline-danger me-2" id="clearCategoryBtn">De-alloca categoria</button>
-          <button class="btn btn-primary">Assegna automaticamente</button>
+      <div class="col-12">
+        <div class="row g-3 align-items-start flex-wrap">
+          <div class="col-lg">
+            <div class="alert alert-light border small mb-0">
+              <div class="fw-semibold mb-1">Come usare le de-allocazioni</div>
+              <ul class="mb-0 ps-3">
+                <li>Imposta colonna, riga, direzione e numero per "De-alloca area"; lascia i campi vuoti per agire su tutta la categoria.</li>
+                <li>La de-allocazione di una categoria comporta la ristampa di tutte le etichette e il riposizionamento dei cassetti.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="col-lg-auto d-flex flex-wrap justify-content-lg-end gap-2">
+            <button type="button" class="btn btn-outline-warning" id="clearAreaBtn">De-alloca area</button>
+            <button type="button" class="btn btn-outline-danger" id="clearCategoryBtn">De-alloca categoria</button>
+            <button class="btn btn-primary">Assegna automaticamente</button>
+          </div>
         </div>
       </div>
     </div>
@@ -260,30 +270,49 @@ document.addEventListener('DOMContentLoaded', function(){
     });
   }
 
-  const clearBtn = document.getElementById('clearCategoryBtn');
-  if (clearBtn) {
-    clearBtn.addEventListener('click', function(e){
-      e.preventDefault();
-      const form = document.getElementById('autoAssignForm');
-      if (!form) return;
-      const startCol = (document.getElementById('start_col')?.value || '').trim();
-      const startRow = (document.getElementById('start_row')?.value || '').trim();
-      const countVal = parseInt(document.getElementById('countInput')?.value || '0', 10);
-      let scope = 'all';
-      if (startCol && startRow && countVal > 0) {
-        const useRange = confirm(`Vuoi de-allocare solo l'intervallo di ${countVal} celle a partire da ${startCol}${startRow}? OK per l'intervallo, Annulla per l'intera categoria.`);
-        scope = useRange ? 'range' : 'all';
+  function submitClear(scope) {
+    const form = document.getElementById('autoAssignForm');
+    if (!form) return false;
+    const startCol = (document.getElementById('start_col')?.value || '').trim();
+    const startRow = (document.getElementById('start_row')?.value || '').trim();
+    const countVal = parseInt(document.getElementById('countInput')?.value || '0', 10);
+    const direction = (document.querySelector('select[name=\"direction\"]')?.value || 'H').toUpperCase();
+
+    if (scope === 'range') {
+      if (!startCol || !startRow || !countVal || Number.isNaN(countVal) || countVal <= 0) {
+        alert('Per de-allocare un\\'area, compila colonna, riga e numero di celle.');
+        return false;
       }
-      const firstConfirmMsg = scope === 'range'
-        ? "Confermi di voler de-allocare la categoria solo nell'intervallo selezionato?"
-        : "Confermi di voler de-allocare TUTTA la categoria dalla cassettiera selezionata?";
-      const firstConfirm = confirm(firstConfirmMsg);
-      if (!firstConfirm) return;
-      const secondConfirm = confirm('Operazione invasiva: sarà necessario ristampare tutte le etichette e riposizionare i cassetti. Procedere comunque?');
-      if (!secondConfirm) return;
-      document.getElementById('clearScope').value = scope;
-      document.getElementById('formAction').value = 'clear_category';
-      form.submit();
+      const dirLabel = direction === 'V' ? 'verticale' : 'orizzontale';
+      const rangeConfirm = confirm(`De-allocare ${countVal} celle (${dirLabel}) a partire da ${startCol}${startRow}?`);
+      if (!rangeConfirm) return false;
+    } else {
+      const fullConfirm = confirm('Confermi di voler de-allocare TUTTA la categoria dalla cassettiera selezionata?');
+      if (!fullConfirm) return false;
+    }
+
+    const safetyConfirm = confirm('Operazione invasiva: sarà necessario ristampare tutte le etichette e riposizionare i cassetti. Procedere comunque?');
+    if (!safetyConfirm) return false;
+
+    document.getElementById('clearScope').value = scope;
+    document.getElementById('formAction').value = 'clear_category';
+    form.submit();
+    return true;
+  }
+
+  const clearCategoryBtn = document.getElementById('clearCategoryBtn');
+  if (clearCategoryBtn) {
+    clearCategoryBtn.addEventListener('click', function(e){
+      e.preventDefault();
+      submitClear('all');
+    });
+  }
+
+  const clearAreaBtn = document.getElementById('clearAreaBtn');
+  if (clearAreaBtn) {
+    clearAreaBtn.addEventListener('click', function(e){
+      e.preventDefault();
+      submitClear('range');
     });
   }
 
