@@ -3561,16 +3561,28 @@ def labels_pdf():
             col_code = getattr(slot, "col_code", "") or ""
             row_num = getattr(slot, "row_num", None)
             label_txt = slot_label(slot, for_display=False, fallback_col=col_code, fallback_row=row_num)
+            row_col_lines = []
+            if row_num is not None and col_code:
+                row_col_lines = [f"Rig: {int(row_num)}", f"Col: {col_code.upper()}"]
             if slot and slot.print_label_override:
                 custom_slot_label = True
-                pos_font_size = max(position_font_size - 0.5, 4.0)
-                pos_line_height = pos_font_size + 0.6
+                pos_font_size = max(position_font_size - 1.2, 4.0)
                 available_w = max(pos_block_w - mm_to_pt(1), mm_to_pt(6))
                 pos_texts = wrap_to_lines(label_txt, "Helvetica-Bold", pos_font_size, available_w, max_lines=2) or [label_txt]
-                max_width = max(pdfmetrics.stringWidth(txt, "Helvetica-Bold", pos_font_size) for txt in pos_texts)
-                pos_block_w = max(pos_block_w, max_width + mm_to_pt(1))
-            elif row_num is not None and col_code:
-                pos_texts = (f"Rig: {int(row_num)}", f"Col: {col_code.upper()}")
+                pos_line_height = pos_font_size + 0.6
+                combined_lines = list(pos_texts) + row_col_lines
+                available_h = qr_box if qr_box else lab_h - padding_x
+                while combined_lines and (pos_line_height * len(combined_lines)) > available_h and pos_font_size > 4.0:
+                    pos_font_size = max(pos_font_size - 0.4, 4.0)
+                    pos_line_height = pos_font_size + 0.6
+                    pos_texts = wrap_to_lines(label_txt, "Helvetica-Bold", pos_font_size, available_w, max_lines=2) or [label_txt]
+                    combined_lines = list(pos_texts) + row_col_lines
+                pos_texts = combined_lines or row_col_lines
+                if pos_texts:
+                    max_width = max(pdfmetrics.stringWidth(txt, "Helvetica-Bold", pos_font_size) for txt in pos_texts)
+                    pos_block_w = max(pos_block_w, max_width + mm_to_pt(1))
+            elif row_col_lines:
+                pos_texts = row_col_lines
                 required_w = max(pdfmetrics.stringWidth(txt, "Helvetica-Bold", pos_font_size) for txt in pos_texts) + mm_to_pt(1)
                 pos_block_w = max(pos_block_w, required_w)
 
