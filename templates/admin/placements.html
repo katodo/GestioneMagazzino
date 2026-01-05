@@ -199,7 +199,6 @@ document.addEventListener('DOMContentLoaded', function(){
   const clearScopeInput = document.getElementById('clearScope');
   const startColInput = document.getElementById('start_col');
   const startRowInput = document.getElementById('start_row');
-  const autoAssignBtn = document.getElementById('autoAssignBtn');
 
   function escapeHtml(str){
     return (str || '').replace(/[&<>"']/g, function(m) {
@@ -277,81 +276,57 @@ document.addEventListener('DOMContentLoaded', function(){
     });
   }
 
-  function submitClear(scope, btn) {
-    if (!form || !actionInput || !clearScopeInput) return false;
-    const startCol = (startColInput?.value || '').trim().toUpperCase();
-    const startRow = (startRowInput?.value || '').trim();
-    const countVal = parseInt(document.getElementById('countInput')?.value || '0', 10);
-    const direction = (document.querySelector('select[name=\"direction\"]')?.value || 'H').toUpperCase();
-
-    if (scope === 'range') {
-      if (!startCol || !startRow || !countVal || Number.isNaN(countVal) || countVal <= 0) {
-        alert('Per de-allocare un\\'area, compila colonna, riga e numero di celle.');
-        return false;
-      }
-      const dirLabel = direction === 'V' ? 'verticale' : 'orizzontale';
-      const rangeConfirm = confirm(`De-allocare ${countVal} celle (${dirLabel}) a partire da ${startCol}${startRow}?`);
-      if (!rangeConfirm) return false;
-    } else {
-      const fullConfirm = confirm('Confermi di voler de-allocare TUTTA la categoria dalla cassettiera selezionata?');
-      if (!fullConfirm) return false;
-    }
-
-    const safetyConfirm = confirm('Operazione invasiva: sarà necessario ristampare tutte le etichette e riposizionare i cassetti. Procedere comunque?');
-    if (!safetyConfirm) return false;
-
-    clearScopeInput.value = scope;
-    actionInput.value = 'clear_category';
-    if (startColInput) startColInput.value = startCol;
-    if (startRowInput) startRowInput.value = startRow;
-    if (typeof form.requestSubmit === 'function') {
-      form.requestSubmit(btn || null);
-    } else {
-      form.submit();
-    }
-    return true;
-  }
-
-  const clearCategoryBtn = document.getElementById('clearCategoryBtn');
-  if (clearCategoryBtn) {
-    clearCategoryBtn.addEventListener('click', function(e){
-      e.preventDefault();
-      submitClear('all', clearCategoryBtn);
-    });
-  }
-
-  const clearAreaBtn = document.getElementById('clearAreaBtn');
-  if (clearAreaBtn) {
-    clearAreaBtn.addEventListener('click', function(e){
-      e.preventDefault();
-      submitClear('range', clearAreaBtn);
-    });
-  }
-
   if (form) {
     form.addEventListener('submit', function(ev){
-      const actionValue = actionInput?.value || 'auto_assign';
-      const scopeValue = clearScopeInput?.value || 'all';
-      if (actionValue === 'auto_assign') {
-        const colVal = (startColInput?.value || '').trim().toUpperCase();
-        const rowVal = (startRowInput?.value || '').trim();
+      const submitter = ev.submitter || null;
+      const isClearArea = submitter && submitter.id === 'clearAreaBtn';
+      const isClearCategory = submitter && submitter.id === 'clearCategoryBtn';
+      const isAutoAssign = !isClearArea && !isClearCategory;
+
+      const colVal = (startColInput?.value || '').trim().toUpperCase();
+      const rowVal = (startRowInput?.value || '').trim();
+      const countVal = parseInt(document.getElementById('countInput')?.value || '0', 10);
+      const direction = (document.querySelector('select[name=\"direction\"]')?.value || 'H').toUpperCase();
+
+      if (startColInput) startColInput.value = colVal;
+      if (startRowInput) startRowInput.value = rowVal;
+
+      if (isAutoAssign) {
         if (!colVal || !rowVal) {
           ev.preventDefault();
           alert('Seleziona una cella di partenza cliccando sulla griglia o compilando i campi dedicati.');
           return;
         }
-        if (startColInput) startColInput.value = colVal;
-        if (startRowInput) startRowInput.value = rowVal;
-        if (clearScopeInput) clearScopeInput.value = scopeValue || 'all';
+        if (actionInput) actionInput.value = 'auto_assign';
+        if (clearScopeInput) clearScopeInput.value = 'all';
+        return;
       }
-      if (actionInput) actionInput.value = actionValue || 'auto_assign';
-    });
-  }
 
-  if (autoAssignBtn) {
-    autoAssignBtn.addEventListener('click', function(){
-      if (actionInput) actionInput.value = 'auto_assign';
-      if (clearScopeInput) clearScopeInput.value = 'all';
+      // da qui: pulsanti di de-allocazione
+      const scope = isClearArea ? 'range' : 'all';
+      if (!actionInput || !clearScopeInput) {
+        ev.preventDefault();
+        alert('Impossibile inviare il comando: input nascosti mancanti.');
+        return;
+      }
+      clearScopeInput.value = scope;
+      actionInput.value = 'clear_category';
+
+      if (isClearArea) {
+        if (!colVal || !rowVal || !countVal || Number.isNaN(countVal) || countVal <= 0) {
+          ev.preventDefault();
+          alert('Per de-allocare un\'area, compila colonna, riga e numero di celle.');
+          return;
+        }
+        const dirLabel = direction === 'V' ? 'verticale' : 'orizzontale';
+        const rangeConfirm = confirm(`De-allocare ${countVal} celle (${dirLabel}) a partire da ${colVal}${rowVal}?`);
+        if (!rangeConfirm) { ev.preventDefault(); return; }
+      } else {
+        const fullConfirm = confirm('Confermi di voler de-allocare TUTTA la categoria dalla cassettiera selezionata?');
+        if (!fullConfirm) { ev.preventDefault(); return; }
+      }
+      const safetyConfirm = confirm('Operazione invasiva: sarà necessario ristampare tutte le etichette e riposizionare i cassetti. Procedere comunque?');
+      if (!safetyConfirm) { ev.preventDefault(); return; }
     });
   }
 
