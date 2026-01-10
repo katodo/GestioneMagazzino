@@ -2858,11 +2858,19 @@ def _iter_cabinet_walk(cabinet: Cabinet, start_col: str, start_row: int, directi
 
 
 def _thread_size_sort_columns():
+    normalized = func.trim(Item.thread_size)
+    size_order = (
+        select(ThreadSize.sort_order)
+        .join(ThreadStandard, ThreadSize.standard_id == ThreadStandard.id)
+        .where(ThreadStandard.code == Item.thread_standard, ThreadSize.value == normalized)
+        .scalar_subquery()
+    )
     numeric_part = case((
-        Item.thread_size.ilike("M%"),
-        func.cast(func.replace(func.substr(Item.thread_size, 2), ",", "."), db.Float),
+        normalized.ilike("M%"),
+        func.cast(func.replace(func.substr(normalized, 2), ",", "."), db.Float),
     ))
-    return [numeric_part, Item.thread_size]
+    size_rank = func.coalesce(size_order, numeric_part)
+    return [size_rank, normalized, Item.thread_size]
 
 
 def _sort_columns_for_key(key: str):
