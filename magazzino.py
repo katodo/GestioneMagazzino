@@ -2,7 +2,7 @@
 from flask import Flask, render_template, redirect, url_for, request, jsonify, flash, send_file
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-from sqlalchemy import func, select, or_, text
+from sqlalchemy import func, select, or_, text, case
 from sqlalchemy.orm import selectinload
 from datetime import datetime, timezone
 from typing import Optional
@@ -2857,6 +2857,26 @@ def _iter_cabinet_walk(cabinet: Cabinet, start_col: str, start_row: int, directi
                 yield cols[ci], rows[ri]
 
 
+def _thread_size_sort_columns():
+    numeric_part = case((
+        Item.thread_size.ilike("M%"),
+        func.cast(func.replace(func.substr(Item.thread_size, 2), ",", "."), db.Float),
+    ))
+    return [numeric_part, Item.thread_size]
+
+
+def _sort_columns_for_key(key: str):
+    sort_map = {
+        "id": [Item.id],
+        "thread_size": _thread_size_sort_columns(),
+        "thickness_mm": [Item.thickness_mm],
+        "length_mm": [Item.length_mm],
+        "outer_d_mm": [Item.outer_d_mm],
+        "material": [Item.material_id],
+    }
+    return sort_map.get(key, [])
+
+
 def _auto_assign_category(category_id: int,
                           cabinet_id: int,
                           start_col: str,
@@ -2882,19 +2902,10 @@ def _auto_assign_category(category_id: int,
     subq = select(Assignment.item_id)
     q = Item.query.filter(Item.id.not_in(subq), Item.category_id == int(category_id))
 
-    sort_map = {
-        "id":           Item.id,
-        "thread_size":  Item.thread_size,
-        "thickness_mm": Item.thickness_mm,
-        "length_mm":    Item.length_mm,
-        "outer_d_mm":   Item.outer_d_mm,
-        "material":     Item.material_id,
-    }
     order_cols = []
-    if primary_key in sort_map:
-        order_cols.append(sort_map[primary_key])
-    if secondary_key in sort_map and secondary_key != primary_key:
-        order_cols.append(sort_map[secondary_key])
+    order_cols.extend(_sort_columns_for_key(primary_key))
+    if secondary_key and secondary_key != primary_key:
+        order_cols.extend(_sort_columns_for_key(secondary_key))
     if not order_cols:
         order_cols = [Item.id]
     q = q.order_by(*order_cols)
@@ -3089,9 +3100,9 @@ def _placements_internal():
     cabinets = Cabinet.query.order_by(Cabinet.name).all()
     categories = Category.query.order_by(Category.name).all()
     sort_options = [
+        ("thread_size",  "Misura"),
         ("length_mm", "Lunghezza/Spessore (mm)"),
         ("outer_d_mm", "Ø esterno (mm)"),
-        ("thread_size",  "Filettatura"),
         ("material",     "Materiale"),
         ("id",           "ID articolo"),
     ]
@@ -3099,7 +3110,7 @@ def _placements_internal():
     # Valori di default letti dalla querystring
     form_cabinet_id  = request.args.get("cabinet_id", type=int)
     form_category_id = request.args.get("category_id", type=int)
-    primary_key      = request.args.get("primary_key") or "length_mm"
+    primary_key      = request.args.get("primary_key") or "thread_size"
     secondary_key    = request.args.get("secondary_key") or "material"
     direction        = (request.args.get("direction") or "H").upper()
     count_val        = request.args.get("count", type=int) or 10
@@ -3122,7 +3133,7 @@ def _placements_internal():
             flash("Parametri non validi per l'assegnamento automatico.", "danger")
             return redirect(url_for(target_endpoint))
 
-        primary_key    = form.get("primary_key") or primary_key or "length_mm"
+        primary_key    = form.get("primary_key") or primary_key or "thread_size"
         secondary_key  = form.get("secondary_key") or ""
         direction      = (form.get("direction") or direction or "H").upper()
         count_val      = max(1, int(form.get("count") or (count_val or 1)))
