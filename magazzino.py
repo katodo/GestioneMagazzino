@@ -2,7 +2,7 @@
 from flask import Flask, render_template, redirect, url_for, request, jsonify, flash, send_file
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-from sqlalchemy import func, select, or_, text
+from sqlalchemy import func, select, or_, text, case
 from sqlalchemy.orm import selectinload
 from datetime import datetime, timezone
 from typing import Optional
@@ -2858,13 +2858,10 @@ def _iter_cabinet_walk(cabinet: Cabinet, start_col: str, start_row: int, directi
 
 
 def _thread_size_sort_columns():
-    numeric_part = func.case(
-        (
-            Item.thread_size.ilike("M%"),
-            func.cast(func.replace(func.substr(Item.thread_size, 2), ",", "."), db.Float),
-        ),
-        else_=None,
-    )
+    numeric_part = case((
+        Item.thread_size.ilike("M%"),
+        func.cast(func.replace(func.substr(Item.thread_size, 2), ",", "."), db.Float),
+    ))
     return [numeric_part, Item.thread_size]
 
 
