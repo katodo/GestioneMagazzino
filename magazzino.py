@@ -2816,7 +2816,24 @@ def mqtt_publish_slot():
 @app.route("/admin/slot_items/<int:item_id>/clear", methods=["POST"])
 @login_required
 def slot_clear_item(item_id):
+    slot_ids = [a.slot_id for a in Assignment.query.filter_by(item_id=item_id).all()]
     Assignment.query.filter_by(item_id=item_id).delete()
+    if slot_ids:
+        remaining = {
+            sid for (sid,) in db.session.query(Assignment.slot_id)
+            .filter(Assignment.slot_id.in_(slot_ids))
+            .distinct()
+            .all()
+        }
+        empty_slots = [sid for sid in set(slot_ids) if sid not in remaining]
+        if empty_slots:
+            Slot.query.filter(Slot.id.in_(empty_slots)).update(
+                {
+                    Slot.display_label_override: None,
+                    Slot.print_label_override: None,
+                },
+                synchronize_session=False,
+            )
     db.session.commit()
     return jsonify({"ok": True})
 
@@ -3093,6 +3110,21 @@ def _deallocate_category_from_cabinet(
     slot_ids = {a.slot_id for a in assigns}
 
     deleted = Assignment.query.filter(Assignment.id.in_(assign_ids)).delete(synchronize_session=False)
+    remaining_slots = {
+        sid for (sid,) in db.session.query(Assignment.slot_id)
+        .filter(Assignment.slot_id.in_(slot_ids))
+        .distinct()
+        .all()
+    }
+    empty_slots = [sid for sid in slot_ids if sid not in remaining_slots]
+    if empty_slots:
+        Slot.query.filter(Slot.id.in_(empty_slots)).update(
+            {
+                Slot.display_label_override: None,
+                Slot.print_label_override: None,
+            },
+            synchronize_session=False,
+        )
     db.session.commit()
 
     return {
