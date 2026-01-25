@@ -45,7 +45,7 @@
       </div>
       <div class="col-md-3">
         <label class="form-label">Numero di articoli</label>
-        <input type="number" min="1" class="form-control" id="countInput" name="count" value="{{ count or 10 }}">
+        <input type="number" min="0" class="form-control" id="countInput" name="count" value="{{ count or 10 }}">
       </div>
       <div class="col-md-3">
         <label class="form-label">Direzione</label>
@@ -248,9 +248,7 @@ document.addEventListener('DOMContentLoaded', function(){
     categorySelect.addEventListener('change', function() {
       const selected = categorySelect.options[categorySelect.selectedIndex];
       const unplacedValue = selected ? selected.dataset.unplaced : '';
-      if (unplacedValue !== undefined && unplacedValue !== '') {
-        countInput.value = unplacedValue;
-      }
+      countInput.value = unplacedValue ?? 0;
       if (unplacedCount) {
         unplacedCount.textContent = unplacedValue ?? '';
       }
