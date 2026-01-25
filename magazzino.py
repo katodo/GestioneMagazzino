@@ -7,6 +7,8 @@ from sqlalchemy.orm import selectinload
 from datetime import datetime, timezone
 from typing import Optional
 from itertools import islice
+from functools import wraps
+from werkzeug.security import generate_password_hash, check_password_hash
 import json
 import os, io, csv
 
@@ -49,6 +51,60 @@ class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
     password = db.Column(db.String(128), nullable=False)
+    role_id = db.Column(db.Integer, db.ForeignKey("role.id"), nullable=True)
+    role = db.relationship("Role", back_populates="users", lazy="joined")
+
+    def set_password(self, raw_password: str) -> None:
+        self.password = generate_password_hash(raw_password)
+
+    def check_password(self, raw_password: str) -> bool:
+        if not self.password:
+            return False
+        if self.password.startswith("pbkdf2:") or self.password.startswith("scrypt:"):
+            return check_password_hash(self.password, raw_password)
+        return self.password == raw_password
+
+    def has_permission(self, permission_key: str) -> bool:
+        if not self.role_id:
+            return False
+        role = getattr(self, "role", None)
+        if role:
+            return any(p.key == permission_key for p in role.permissions)
+        return (
+            db.session.query(Permission.id)
+            .join(RolePermission, Permission.id == RolePermission.permission_id)
+            .filter(RolePermission.role_id == self.role_id, Permission.key == permission_key)
+            .first()
+            is not None
+        )
+
+class AnonymousUser(UserMixin):
+    def has_permission(self, permission_key: str) -> bool:
+        return False
+
+login_manager.anonymous_user = AnonymousUser
+
+class Role(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), unique=True, nullable=False)
+    description = db.Column(db.String(200), nullable=True)
+    is_system = db.Column(db.Boolean, nullable=False, default=False)
+    permissions = db.relationship("Permission", secondary="role_permission", back_populates="roles")
+    users = db.relationship("User", back_populates="role")
+
+class Permission(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(80), unique=True, nullable=False)
+    label = db.Column(db.String(120), nullable=False)
+    description = db.Column(db.String(200), nullable=True)
+    is_system = db.Column(db.Boolean, nullable=False, default=False)
+    roles = db.relationship("Role", secondary="role_permission", back_populates="permissions")
+
+class RolePermission(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    role_id = db.Column(db.Integer, db.ForeignKey("role.id"), nullable=False)
+    permission_id = db.Column(db.Integer, db.ForeignKey("permission.id"), nullable=False)
+    __table_args__ = (db.UniqueConstraint("role_id", "permission_id", name="uq_role_permission"),)
 
 class Settings(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -262,6 +318,12 @@ def column_code_valid(code: str) -> bool:
     if len(code) == 1:   return 'A' <= code <= 'Z'
     if len(code) == 2:   return 'A' <= code[0] <= 'Z' and 'A' <= code[1] <= 'Z'
     return False
+
+def users_with_permission(permission_key: str):
+    return (User.query.join(Role)
+            .join(RolePermission, Role.id == RolePermission.role_id)
+            .join(Permission, Permission.id == RolePermission.permission_id)
+            .filter(Permission.key == permission_key))
 
 def colcode_to_idx(code:str)->int:
     code = code.strip().upper()
@@ -725,7 +787,31 @@ def ensure_slot_columns():
     if added:
         db.session.commit()
 
+def ensure_user_columns():
+    """Aggiunge eventuali nuove colonne alla tabella user (compatibilità DB esistenti)."""
+    try:
+        rows = db.session.execute(text("PRAGMA table_info(user)")).fetchall()
+    except Exception:
+        return
+    existing_cols = {r[1] for r in rows}
+    new_cols = [
+        ("role_id", "INTEGER", None),
+    ]
+    added = False
+    for col_name, col_type, default_val in new_cols:
+        if col_name not in existing_cols:
+            try:
+                default_sql = f" DEFAULT '{default_val}'" if default_val is not None else ""
+                db.session.execute(text(f"ALTER TABLE user ADD COLUMN {col_name} {col_type}{default_sql}"))
+                added = True
+            except Exception:
+                db.session.rollback()
+                return
+    if added:
+        db.session.commit()
+
 _schema_checked = False
+_auth_seeded = False
 
 def ensure_core_schema():
     """Esegue una verifica unica dello schema per aggiungere colonne mancanti."""
@@ -737,11 +823,35 @@ def ensure_core_schema():
     ensure_category_columns()
     ensure_mqtt_settings_columns()
     ensure_slot_columns()
+    ensure_user_columns()
     _schema_checked = True
 
 @app.before_request
 def prepare_schema():
     ensure_core_schema()
+    global _auth_seeded
+    if not _auth_seeded:
+        ensure_auth_defaults()
+        _auth_seeded = True
+
+@app.before_request
+def enforce_login_and_permissions():
+    if request.endpoint in {"login", "register", "static"}:
+        return None
+    try:
+        user_count = User.query.count()
+    except Exception:
+        return None
+    if user_count == 0 and request.endpoint not in {"login", "register"}:
+        return redirect(url_for("login"))
+    if request.path.startswith("/admin"):
+        if not current_user.is_authenticated:
+            return login_manager.unauthorized()
+        required = required_permissions_for_path(request.path)
+        if required and not any(current_user.has_permission(p) for p in required):
+            flash("Non hai i permessi per accedere a questa sezione.", "danger")
+            return redirect(url_for("index"))
+    return None
 
 def get_settings()->Settings:
     ensure_core_schema()
@@ -788,6 +898,91 @@ def get_mqtt_settings() -> MqttSettings:
         db.session.add(s)
         db.session.commit()
     return s
+
+def get_or_create_permission(key: str, label: str, description: Optional[str] = None, is_system: bool = False) -> Permission:
+    perm = Permission.query.filter_by(key=key).first()
+    if not perm:
+        perm = Permission(key=key, label=label, description=description, is_system=is_system)
+        db.session.add(perm)
+        db.session.flush()
+    return perm
+
+def get_or_create_role(name: str, description: Optional[str] = None, is_system: bool = False) -> Role:
+    role = Role.query.filter_by(name=name).first()
+    if not role:
+        role = Role(name=name, description=description, is_system=is_system)
+        db.session.add(role)
+        db.session.flush()
+    return role
+
+def ensure_auth_defaults():
+    default_permissions = [
+        ("manage_items", "Gestione articoli", "Creazione e modifica articoli", True),
+        ("manage_placements", "Posizionamento articoli", "Assegnazione e spostamenti", True),
+        ("manage_config", "Configurazione catalogo", "Categorie, materiali, campi e impostazioni", True),
+        ("manage_locations", "Gestione ubicazioni", "Cassettiere, ubicazioni e slot", True),
+        ("manage_users", "Gestione utenti", "Assegnazione ruoli agli utenti", True),
+        ("manage_roles", "Configurazione ruoli", "Creazione ruoli e permessi", True),
+    ]
+    perms_by_key = {}
+    for key, label, description, is_system in default_permissions:
+        perms_by_key[key] = get_or_create_permission(key, label, description, is_system=is_system)
+
+    admin_role = get_or_create_role("Admin", "Accesso completo", is_system=True)
+    operator_role = get_or_create_role("Operatore", "Gestione articoli e posizionamento", is_system=True)
+    viewer_role = get_or_create_role("Lettore", "Accesso in sola lettura", is_system=True)
+
+    if not admin_role.permissions:
+        admin_role.permissions = list(perms_by_key.values())
+    if not operator_role.permissions:
+        operator_role.permissions = [
+            perms_by_key["manage_items"],
+            perms_by_key["manage_placements"],
+        ]
+
+    db.session.flush()
+
+    users_without_role = User.query.filter(User.role_id.is_(None)).order_by(User.id).all()
+    if users_without_role:
+        first_user_id = users_without_role[0].id
+        for user in users_without_role:
+            if user.username == "admin" or user.id == first_user_id:
+                user.role = admin_role
+            else:
+                user.role = viewer_role
+
+    db.session.commit()
+
+def required_permissions_for_path(path: str) -> Optional[set]:
+    if path.startswith("/admin/config"):
+        return {"manage_config", "manage_users", "manage_roles"}
+    if path.startswith("/admin/users"):
+        return {"manage_users"}
+    if path.startswith("/admin/roles") or path.startswith("/admin/permissions"):
+        return {"manage_roles"}
+    if path.startswith("/admin/categories") or path.startswith("/admin/subtypes"):
+        return {"manage_config"}
+    if path.startswith("/admin/materials") or path.startswith("/admin/finishes"):
+        return {"manage_config"}
+    if path.startswith("/admin/custom_fields") or path.startswith("/admin/settings") or path.startswith("/admin/mqtt"):
+        return {"manage_config"}
+    if path.startswith("/admin/locations") or path.startswith("/admin/cabinets") or path.startswith("/admin/slots"):
+        return {"manage_locations"}
+    if path.startswith("/admin/posizionamento") or path.startswith("/admin/to_place"):
+        return {"manage_placements"}
+    if path.startswith("/admin/unplaced") or path.startswith("/admin/grid_assign"):
+        return {"manage_placements"}
+    if path.startswith("/admin/auto_assign") or path.startswith("/admin/slot_items") or path.startswith("/admin/slot_label"):
+        return {"manage_placements"}
+    if path.startswith("/admin/items"):
+        if any(keyword in path for keyword in ["set_position", "clear_position", "move_slot", "suggest_position"]):
+            return {"manage_placements"}
+        return {"manage_items"}
+    if path.startswith("/admin/labels") or path.startswith("/admin/cards") or path.startswith("/admin/items/export"):
+        return {"manage_items"}
+    if path == "/admin":
+        return {"manage_items"}
+    return None
 
 def mqtt_payload_for_slot(cabinet: Cabinet, col_code: str, row_num: int, settings: MqttSettings):
     if not cabinet:
@@ -1117,11 +1312,49 @@ def load_user(user_id):
 @app.route("/login", methods=["GET","POST"])
 def login():
     if request.method == "POST":
-        user = User.query.filter_by(username=request.form["username"]).first()
-        if user and user.password == request.form["password"]:
-            login_user(user); return redirect(url_for("admin_items"))
+        username = (request.form.get("username") or "").strip()
+        password = request.form.get("password") or ""
+        user = User.query.filter_by(username=username).first()
+        if user and user.check_password(password):
+            if not (user.password.startswith("pbkdf2:") or user.password.startswith("scrypt:")):
+                user.set_password(password)
+                db.session.commit()
+            login_user(user)
+            if user.has_permission("manage_items"):
+                return redirect(url_for("admin_items"))
+            return redirect(url_for("index"))
         flash("Credenziali non valide", "danger")
     return render_template("login.html")
+
+@app.route("/register", methods=["POST"])
+def register():
+    username = (request.form.get("username") or "").strip()
+    password = request.form.get("password") or ""
+    confirm = request.form.get("confirm_password") or ""
+    if len(username) < 3:
+        return _flash_back("Username troppo corto (minimo 3 caratteri).", "danger", "login")
+    if len(password) < 6:
+        return _flash_back("Password troppo corta (minimo 6 caratteri).", "danger", "login")
+    if password != confirm:
+        return _flash_back("Le password non coincidono.", "danger", "login")
+    if User.query.filter_by(username=username).first():
+        return _flash_back("Username già utilizzato.", "danger", "login")
+
+    role = Role.query.filter_by(name="Lettore").first()
+    if User.query.count() == 0:
+        role = Role.query.filter_by(name="Admin").first()
+    if role is None:
+        role = get_or_create_role("Lettore", "Accesso in sola lettura", is_system=True)
+
+    user = User(username=username, role=role)
+    user.set_password(password)
+    db.session.add(user)
+    db.session.commit()
+    login_user(user)
+    flash("Registrazione completata.", "success")
+    if user.has_permission("manage_items"):
+        return redirect(url_for("admin_items"))
+    return redirect(url_for("index"))
 
 @app.route("/logout")
 @login_required
@@ -1228,6 +1461,8 @@ def _render_articles_page():
     total_items = Item.query.count()
     total_categories = Category.query.count()
 
+    can_manage_items = current_user.is_authenticated and current_user.has_permission("manage_items")
+    can_manage_placements = current_user.is_authenticated and current_user.has_permission("manage_placements")
     return render_template("articles.html",
         items=items, categories=categories, materials=materials, finishes=finishes,
         locations=locations, cabinets=cabinets,
@@ -1244,7 +1479,8 @@ def _render_articles_page():
         total_items=total_items,
         total_categories=total_categories,
         low_stock_threshold=low_stock_threshold,
-        is_admin=current_user.is_authenticated,
+        can_manage_items=can_manage_items,
+        can_manage_placements=can_manage_placements,
         stock_filter=stock_filter,
         measure_q=measure_q,
         measure_labels=measure_labels,
@@ -1395,7 +1631,8 @@ def cassettiere():
     categories = Category.query.order_by(Category.name).all()
     subq = select(Assignment.item_id)
     unplaced_json = []
-    if current_user.is_authenticated:
+    can_manage_placements = current_user.is_authenticated and current_user.has_permission("manage_placements")
+    if can_manage_placements:
         unplaced = Item.query.filter(Item.id.not_in(subq)).all()
         unplaced_json = [
             {"id": it.id, "caption": auto_name_for(it), "category_id": it.category_id}
@@ -1409,7 +1646,7 @@ def cassettiere():
         selected_cab_id=cab_id,
         grid=grid,
         unplaced_json=unplaced_json,
-        is_admin=current_user.is_authenticated,
+        can_manage_placements=can_manage_placements,
     )
 
 def short_cell_text(item: Item) -> str:
@@ -2220,6 +2457,12 @@ def admin_config():
     field_defs = build_field_definitions(serialized_custom_fields)
     category_fields = build_category_field_map(categories)
     used_category_fields = get_used_field_keys_by_category()
+    users = User.query.order_by(User.username).all()
+    roles = Role.query.order_by(Role.name).all()
+    permissions = Permission.query.order_by(Permission.label).all()
+    can_manage_config = current_user.has_permission("manage_config")
+    can_manage_users = current_user.has_permission("manage_users")
+    can_manage_roles = current_user.has_permission("manage_roles")
     return render_template(
         "admin/config.html",
         locations=locations,
@@ -2239,7 +2482,105 @@ def admin_config():
         field_defs=field_defs,
         category_fields=category_fields,
         used_category_fields=used_category_fields,
+        users=users,
+        roles=roles,
+        permissions=permissions,
+        can_manage_config=can_manage_config,
+        can_manage_users=can_manage_users,
+        can_manage_roles=can_manage_roles,
     )
+
+@app.route("/admin/users/<int:user_id>/role", methods=["POST"])
+@login_required
+def update_user_role(user_id):
+    user = User.query.get_or_404(user_id)
+    role_id = request.form.get("role_id", type=int)
+    role = Role.query.get(role_id)
+    if not role:
+        return _flash_back("Ruolo non valido.", "danger", "admin_config", "utenti")
+    if user.id == current_user.id and not any(p.key == "manage_users" for p in role.permissions):
+        return _flash_back("Non puoi rimuovere i permessi di gestione utenti dal tuo account.", "danger", "admin_config", "utenti")
+    if user.has_permission("manage_users") and not any(p.key == "manage_users" for p in role.permissions):
+        remaining_admins = users_with_permission("manage_users").filter(User.id != user.id).count()
+        if remaining_admins == 0:
+            return _flash_back("Deve esistere almeno un amministratore.", "danger", "admin_config", "utenti")
+    user.role = role
+    db.session.commit()
+    flash("Ruolo utente aggiornato.", "success")
+    return redirect(_admin_config_url("utenti"))
+
+@app.route("/admin/roles/add", methods=["POST"])
+@login_required
+def add_role():
+    name = (request.form.get("name") or "").strip()
+    description = (request.form.get("description") or "").strip() or None
+    if len(name) < 2:
+        return _flash_back("Nome ruolo troppo corto.", "danger", "admin_config", "ruoli")
+    if Role.query.filter_by(name=name).first():
+        return _flash_back("Esiste già un ruolo con questo nome.", "danger", "admin_config", "ruoli")
+    role = Role(name=name, description=description, is_system=False)
+    db.session.add(role)
+    db.session.commit()
+    flash("Ruolo creato.", "success")
+    return redirect(_admin_config_url("ruoli"))
+
+@app.route("/admin/roles/<int:role_id>/update", methods=["POST"])
+@login_required
+def update_role(role_id):
+    role = Role.query.get_or_404(role_id)
+    name = (request.form.get("name") or "").strip()
+    description = (request.form.get("description") or "").strip() or None
+    permission_keys = set(request.form.getlist("permission_keys"))
+
+    if len(name) < 2:
+        return _flash_back("Nome ruolo troppo corto.", "danger", "admin_config", "ruoli")
+    existing = Role.query.filter(Role.id != role.id, Role.name == name).first()
+    if existing:
+        return _flash_back("Esiste già un ruolo con questo nome.", "danger", "admin_config", "ruoli")
+    if role.id == current_user.role_id and "manage_users" not in permission_keys:
+        return _flash_back("Non puoi rimuovere la gestione utenti dal tuo ruolo.", "danger", "admin_config", "ruoli")
+    if "manage_users" not in permission_keys:
+        remaining_admins = users_with_permission("manage_users").filter(User.role_id != role.id).count()
+        if remaining_admins == 0 and role.users:
+            return _flash_back("Deve esistere almeno un amministratore.", "danger", "admin_config", "ruoli")
+
+    role.name = name
+    role.description = description
+    permissions = Permission.query.filter(Permission.key.in_(permission_keys)).all() if permission_keys else []
+    role.permissions = permissions
+    db.session.commit()
+    flash("Ruolo aggiornato.", "success")
+    return redirect(_admin_config_url("ruoli"))
+
+@app.route("/admin/roles/<int:role_id>/delete", methods=["POST"])
+@login_required
+def delete_role(role_id):
+    role = Role.query.get_or_404(role_id)
+    if role.is_system:
+        return _flash_back("Impossibile eliminare un ruolo di sistema.", "danger", "admin_config", "ruoli")
+    if role.users:
+        return _flash_back("Impossibile eliminare: ci sono utenti associati.", "danger", "admin_config", "ruoli")
+    db.session.delete(role)
+    db.session.commit()
+    flash("Ruolo eliminato.", "success")
+    return redirect(_admin_config_url("ruoli"))
+
+@app.route("/admin/permissions/add", methods=["POST"])
+@login_required
+def add_permission():
+    key = (request.form.get("key") or "").strip().lower().replace(" ", "_")
+    label = (request.form.get("label") or "").strip()
+    description = (request.form.get("description") or "").strip() or None
+    if len(key) < 3 or not all(ch.isalnum() or ch in {"_", "-"} for ch in key):
+        return _flash_back("Chiave permesso non valida.", "danger", "admin_config", "permessi")
+    if len(label) < 3:
+        return _flash_back("Etichetta permesso troppo corta.", "danger", "admin_config", "permessi")
+    if Permission.query.filter_by(key=key).first():
+        return _flash_back("Esiste già un permesso con questa chiave.", "danger", "admin_config", "permessi")
+    db.session.add(Permission(key=key, label=label, description=description, is_system=False))
+    db.session.commit()
+    flash("Permesso creato.", "success")
+    return redirect(_admin_config_url("permessi"))
 
 @app.route("/admin/config/fields/<int:cat_id>/update", methods=["POST"])
 @login_required
@@ -3949,8 +4290,8 @@ def seed_if_empty_or_missing():
     ensure_item_columns()
     ensure_category_columns()
     ensure_slot_columns()
-    if not User.query.filter_by(username="admin").first():
-        db.session.add(User(username="admin", password="admin"))
+    ensure_user_columns()
+    ensure_auth_defaults()
     if not Settings.query.get(1):
         db.session.add(Settings(
             id=1,

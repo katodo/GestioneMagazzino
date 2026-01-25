@@ -95,7 +95,7 @@
   {% endif %}
 </div>
 
-{% if is_admin %}
+{% if can_manage_placements %}
 <!-- Modal assegnazione -->
 <div class="modal fade" id="assignModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-scrollable">
@@ -198,8 +198,8 @@
 
 <script>
 const MQTT_PUBLISH_URL = '{{ url_for("mqtt_publish_slot") }}';
-const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
-{% if is_admin %}
+const IS_ADMIN = {{ 'true' if can_manage_placements else 'false' }};
+{% if can_manage_placements %}
 const UNPLACED = {{ unplaced_json|tojson }};
 const CLEAR_URL_TEMPLATE = '{{ url_for("slot_clear_item", item_id=0) }}';
 const SLOT_LABEL_URL = '{{ url_for("slot_label_endpoint") }}';
@@ -445,7 +445,7 @@ document.addEventListener('DOMContentLoaded', function(){
   let pendingUsedCell = null;
   initCellPopovers('grid');
 
-  {% if is_admin %}
+  {% if can_manage_placements %}
   const assignModalEl = document.getElementById('assignModal');
   assignModalEl?.addEventListener('shown.bs.modal', () => {
     document.getElementById('flt')?.focus();
@@ -491,7 +491,7 @@ document.addEventListener('DOMContentLoaded', function(){
     }
   });
 
-  {% if is_admin %}
+  {% if can_manage_placements %}
   document.getElementById('flt')?.addEventListener('input', function(){
     const term = this.value.toLowerCase();
     const sel = document.getElementById('item_id');
