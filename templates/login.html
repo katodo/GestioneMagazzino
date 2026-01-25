@@ -1,9 +1,55 @@
 {% extends "base.html" %}
 {% block content %}
-<h3>Login</h3>
-<form method="post" class="form-section" style="max-width:420px">
-  <div class="mb-3"><label>Username</label><input type="text" class="form-control" name="username" required></div>
-  <div class="mb-3"><label>Password</label><input type="password" class="form-control" name="password" required></div>
-  <button type="submit" class="btn btn-primary">Login</button>
-</form>
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+  <div>
+    <h3 class="mb-1">Accesso al portale</h3>
+    <div class="text-muted small">Inserisci le credenziali esistenti oppure registra un nuovo utente.</div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="form-section h-100">
+      <h5 class="mb-2">Login</h5>
+      <form method="post" class="needs-validation" novalidate>
+        <div class="mb-3">
+          <label class="form-label">Username</label>
+          <input type="text" class="form-control" name="username" required>
+          <div class="invalid-feedback">Inserisci l'username.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Password</label>
+          <input type="password" class="form-control" name="password" required>
+          <div class="invalid-feedback">Inserisci la password.</div>
+        </div>
+        <button type="submit" class="btn btn-primary">Login</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="form-section h-100">
+      <h5 class="mb-2">Registrazione</h5>
+      <form method="post" action="{{ url_for('register') }}" class="needs-validation" novalidate>
+        <div class="mb-3">
+          <label class="form-label">Username</label>
+          <input type="text" class="form-control" name="username" minlength="3" required>
+          <div class="invalid-feedback">Minimo 3 caratteri.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Password</label>
+          <input type="password" class="form-control" name="password" minlength="6" required>
+          <div class="invalid-feedback">Minimo 6 caratteri.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Conferma password</label>
+          <input type="password" class="form-control" name="confirm_password" minlength="6" required>
+          <div class="invalid-feedback">Conferma la password.</div>
+        </div>
+        <div class="text-muted small mb-3">Il primo utente registrato diventa amministratore.</div>
+        <button type="submit" class="btn btn-outline-primary">Crea utente</button>
+      </form>
+    </div>
+  </div>
+</div>
 {% endblock %}

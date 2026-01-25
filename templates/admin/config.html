@@ -3,6 +3,7 @@
 <h3>Configurazione</h3>
 <nav class="mb-3">
   <ul class="nav nav-pills flex-wrap gap-2">
+    {% if can_manage_config %}
     <li class="nav-item"><a class="nav-link" href="#categorie">Categorie</a></li>
     <li class="nav-item"><a class="nav-link" href="#sottotipi">Sottotipi</a></li>
     <li class="nav-item"><a class="nav-link" href="#materiali">Materiali</a></li>
@@ -15,9 +16,18 @@
     <li class="nav-item"><a class="nav-link" href="#cassettiere">Cassettiere</a></li>
     <li class="nav-item"><a class="nav-link" href="#fusione-cassetti">Fusione cassetti</a></li>
     <li class="nav-item"><a class="nav-link" href="#sposta-cassetti">Sposta / Scambia cassetti</a></li>
+    {% endif %}
+    {% if can_manage_users %}
+      <li class="nav-item"><a class="nav-link" href="#utenti">Utenti</a></li>
+    {% endif %}
+    {% if can_manage_roles %}
+      <li class="nav-item"><a class="nav-link" href="#ruoli">Ruoli</a></li>
+      <li class="nav-item"><a class="nav-link" href="#permessi">Permessi</a></li>
+    {% endif %}
   </ul>
 </nav>
 <div class="row g-3">
+  {% if can_manage_config %}
   <div class="col-12">
     <div class="form-section" id="categorie">
       <h5>Categorie</h5>
@@ -702,5 +712,125 @@
       </form>
     </div>
   </div>
+  {% endif %}
+
+  {% if can_manage_users %}
+  <div class="col-12">
+    <div class="form-section" id="utenti">
+      <h5>Utenti</h5>
+      <p class="text-muted mb-2 small">Assegna un ruolo agli utenti registrati.</p>
+      <table class="table table-sm table-striped align-middle">
+        <thead>
+          <tr><th style="width:60px;">ID</th><th>Username</th><th style="width:280px;">Ruolo</th><th class="text-end" style="width:120px;">Azione</th></tr>
+        </thead>
+        <tbody>
+          {% for u in users %}
+          <tr>
+            <td>{{ u.id }}</td>
+            <td>{{ u.username }}</td>
+            <td>
+              <select class="form-select" name="role_id" form="user-role-{{ u.id }}">
+                {% for r in roles %}
+                  <option value="{{ r.id }}" {{ 'selected' if u.role_id == r.id else '' }}>{{ r.name }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td class="text-end">
+              <form method="post" action="{{ url_for('update_user_role', user_id=u.id) }}" id="user-role-{{ u.id }}">
+                <button class="btn btn-sm btn-primary">Salva</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if can_manage_roles %}
+  <div class="col-12">
+    <div class="form-section" id="ruoli">
+      <h5>Ruoli</h5>
+      <p class="text-muted mb-2 small">Definisci i ruoli e le funzioni abilitate per ciascun ruolo.</p>
+      <table class="table table-sm table-striped align-middle">
+        <thead>
+          <tr><th style="width:60px;">ID</th><th>Nome</th><th>Descrizione</th><th>Permessi</th><th class="text-end" style="width:160px;">Azione</th></tr>
+        </thead>
+        <tbody>
+          {% for r in roles %}
+          <tr>
+            <td>{{ r.id }}</td>
+            <td><input class="form-control" name="name" value="{{ r.name }}" form="role-{{ r.id }}"></td>
+            <td><input class="form-control" name="description" value="{{ r.description or '' }}" form="role-{{ r.id }}"></td>
+            <td>
+              <div class="d-flex flex-wrap gap-2">
+                {% for p in permissions %}
+                  <label class="form-check form-check-inline mb-0 small">
+                    <input class="form-check-input" type="checkbox" name="permission_keys" value="{{ p.key }}" form="role-{{ r.id }}" {{ 'checked' if p in r.permissions else '' }}>
+                    <span class="form-check-label">{{ p.label }}</span>
+                  </label>
+                {% endfor %}
+              </div>
+            </td>
+            <td class="text-end">
+              <form method="post" action="{{ url_for('update_role', role_id=r.id) }}" id="role-{{ r.id }}" class="d-inline-block">
+                <button class="btn btn-sm btn-primary">Salva</button>
+              </form>
+              {% if not r.is_system %}
+                <form method="post" action="{{ url_for('delete_role', role_id=r.id) }}" class="d-inline-block" onsubmit="return confirm('Eliminare il ruolo?')">
+                  <button class="btn btn-sm btn-outline-danger ms-1">Elimina</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <div class="pt-2 border-top mt-2">
+        <h6 class="mb-2">Nuovo ruolo</h6>
+        <form method="post" action="{{ url_for('add_role') }}" class="row g-2 align-items-center">
+          <div class="col-md-4"><input class="form-control" name="name" placeholder="Nome ruolo"></div>
+          <div class="col-md-6"><input class="form-control" name="description" placeholder="Descrizione (opzionale)"></div>
+          <div class="col-md-2"><button class="btn btn-primary w-100">Aggiungi</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="form-section" id="permessi">
+      <h5>Permessi (funzioni)</h5>
+      <p class="text-muted mb-2 small">Crea nuove funzioni da associare ai ruoli.</p>
+      <table class="table table-sm table-striped align-middle">
+        <thead>
+          <tr><th style="width:60px;">ID</th><th>Chiave</th><th>Etichetta</th><th>Descrizione</th><th style="width:120px;">Tipo</th></tr>
+        </thead>
+        <tbody>
+          {% for p in permissions %}
+          <tr>
+            <td>{{ p.id }}</td>
+            <td><code>{{ p.key }}</code></td>
+            <td>{{ p.label }}</td>
+            <td>{{ p.description or '' }}</td>
+            <td><span class="badge {{ 'bg-secondary' if p.is_system else 'bg-info' }}">{{ 'Sistema' if p.is_system else 'Custom' }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <div class="pt-2 border-top mt-2">
+        <h6 class="mb-2">Nuovo permesso</h6>
+        <form method="post" action="{{ url_for('add_permission') }}" class="row g-2 align-items-center">
+          <div class="col-md-3"><input class="form-control" name="key" placeholder="chiave_permesso"></div>
+          <div class="col-md-4"><input class="form-control" name="label" placeholder="Etichetta"></div>
+          <div class="col-md-4"><input class="form-control" name="description" placeholder="Descrizione (opzionale)"></div>
+          <div class="col-md-1"><button class="btn btn-primary w-100">Aggiungi</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}

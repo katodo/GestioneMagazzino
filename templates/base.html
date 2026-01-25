@@ -99,8 +99,12 @@
         <a href="{{ url_for('articles') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint in ['articles','index','admin_items'] else '' }}">Articoli</a>
         <a href="{{ url_for('cassettiere') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint == 'cassettiere' else '' }}">Casssettiere</a>
         {% if current_user.is_authenticated %}
-          <a href="{{ url_for('placements') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint in ['placements','to_place','auto_assign'] else '' }}">Posizionamento</a>
-          <a href="{{ url_for('admin_config') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint == 'admin_config' else '' }}">Configurazione</a>
+          {% if current_user.has_permission('manage_placements') %}
+            <a href="{{ url_for('placements') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint in ['placements','to_place','auto_assign'] else '' }}">Posizionamento</a>
+          {% endif %}
+          {% if current_user.has_permission('manage_config') or current_user.has_permission('manage_users') or current_user.has_permission('manage_roles') %}
+            <a href="{{ url_for('admin_config') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint == 'admin_config' else '' }}">Configurazione</a>
+          {% endif %}
           <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Logout</a>
         {% else %}
           <a href="{{ url_for('login') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint == 'login' else '' }}">Login</a>
