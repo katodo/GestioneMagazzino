@@ -27,23 +27,6 @@
         <div class="form-text">Articoli non posizionati: <span id="unplacedCount">{{ unplaced_count if unplaced_count is not none else '' }}</span></div>
       </div>
       <div class="col-md-3">
-        <label class="form-label">Chiave primaria</label>
-        <select name="primary_key" class="form-select">
-          {% for v, label in sort_options %}
-            <option value="{{ v }}" {{ 'selected' if v == primary_key else '' }}>{{ label }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="col-md-3">
-        <label class="form-label">Chiave secondaria</label>
-        <select name="secondary_key" class="form-select">
-          <option value="">(nessuna)</option>
-          {% for v, label in sort_options %}
-            <option value="{{ v }}" {{ 'selected' if v == secondary_key else '' }}>{{ label }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="col-md-3">
         <label class="form-label">Numero di articoli</label>
         <input type="number" min="0" class="form-control" id="countInput" name="count" value="{{ count or 10 }}">
       </div>
@@ -71,6 +54,60 @@
           <label class="form-check-label" for="clear_occupied">
             De-alloca celle già popolate nel percorso
           </label>
+        </div>
+      </div>
+      <div class="col-12">
+        <div class="border rounded-3 bg-light-subtle p-3">
+          <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+            <div>
+              <div class="fw-semibold">Chiavi di ordinamento</div>
+              <div class="small text-muted">Definisci l'ordine di priorità dalla primaria alla quarta.</div>
+            </div>
+            <div class="small text-muted">Suggerimento: per le viti usa Misura → Sottotipo → Lunghezza → Materiale.</div>
+          </div>
+          <div class="row g-2 align-items-end">
+            <div class="col-lg-3 col-md-6">
+              <label class="form-label">Primaria</label>
+              <select name="primary_key" class="form-select" id="primaryKeySelect">
+                {% for v, label in sort_options %}
+                  <option value="{{ v }}" {{ 'selected' if v == primary_key else '' }}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-lg-3 col-md-6">
+              <label class="form-label">Secondaria</label>
+              <select name="secondary_key" class="form-select" id="secondaryKeySelect">
+                <option value="">(nessuna)</option>
+                {% for v, label in sort_options %}
+                  <option value="{{ v }}" {{ 'selected' if v == secondary_key else '' }}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-lg-3 col-md-6">
+              <label class="form-label">Terza</label>
+              <select name="tertiary_key" class="form-select" id="tertiaryKeySelect">
+                <option value="">(nessuna)</option>
+                {% for v, label in sort_options %}
+                  <option value="{{ v }}" {{ 'selected' if v == tertiary_key else '' }}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-lg-3 col-md-6">
+              <label class="form-label">Quarta</label>
+              <select name="quaternary_key" class="form-select" id="quaternaryKeySelect">
+                <option value="">(nessuna)</option>
+                {% for v, label in sort_options %}
+                  <option value="{{ v }}" {{ 'selected' if v == quaternary_key else '' }}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <div class="mt-3">
+            <div class="small text-muted mb-1">Anteprima ordinamento (esempio dinamico)</div>
+            <div class="border rounded bg-white p-2">
+              <ol class="mb-0 small" id="sortPreviewList"></ol>
+            </div>
+          </div>
         </div>
       </div>
       <div class="col-12">
@@ -147,6 +184,9 @@
                     {% if cell_custom %}
                       <div class="cell-line fw-bold">{{ cell_label }}</div>
                     {% else %}
+                      {% if cell.auto_label and (cell.entries|length) > 1 %}
+                        <div class="cell-line fw-semibold">{{ cell.label }}</div>
+                      {% endif %}
                       {% for e in cell.entries %}
                         <div class="cell-line">{{ e.text }}</div>
                       {% endfor %}
@@ -199,6 +239,11 @@ document.addEventListener('DOMContentLoaded', function(){
   const clearScopeInput = document.getElementById('clearScope');
   const startColInput = document.getElementById('start_col');
   const startRowInput = document.getElementById('start_row');
+  const primaryKeySelect = document.getElementById('primaryKeySelect');
+  const secondaryKeySelect = document.getElementById('secondaryKeySelect');
+  const tertiaryKeySelect = document.getElementById('tertiaryKeySelect');
+  const quaternaryKeySelect = document.getElementById('quaternaryKeySelect');
+  const previewList = document.getElementById('sortPreviewList');
 
   function escapeHtml(str){
     return (str || '').replace(/[&<>"']/g, function(m) {
@@ -273,6 +318,73 @@ document.addEventListener('DOMContentLoaded', function(){
       td.classList.add('table-primary');
     });
   }
+
+  const sampleItems = [
+    { name: 'Vite Bombata Croce', subtype: 'Bombata Croce', thread_size: 'M2', length_mm: 8, material: 'Acciaio' },
+    { name: 'Vite Bombata Croce', subtype: 'Bombata Croce', thread_size: 'M2', length_mm: 12, material: 'Acciaio' },
+    { name: 'Vite Cilindrica Esagonale', subtype: 'Cilindrica Esagonale', thread_size: 'M2', length_mm: 8, material: 'Acciaio' },
+    { name: 'Vite Bombata Croce', subtype: 'Bombata Croce', thread_size: 'M2.5', length_mm: 10, material: 'Acciaio' },
+    { name: 'Vite Bombata Croce', subtype: 'Bombata Croce', thread_size: 'M3', length_mm: 8, material: 'Acciaio' },
+    { name: 'Vite Cilindrica Esagonale', subtype: 'Cilindrica Esagonale', thread_size: 'M3', length_mm: 8, material: 'Inox' },
+  ];
+
+  function parseThreadSize(value) {
+    const raw = (value || '').trim().toUpperCase();
+    const match = raw.match(/^([A-Z]*)(\d+(?:[.,]\d+)?)?/);
+    const prefix = match ? match[1] : raw;
+    const number = match && match[2] ? parseFloat(match[2].replace(',', '.')) : Number.NaN;
+    return { prefix, number };
+  }
+
+  function compareValues(a, b) {
+    if (a === b) return 0;
+    if (a === null || a === undefined || a === '') return 1;
+    if (b === null || b === undefined || b === '') return -1;
+    if (typeof a === 'number' && typeof b === 'number') return a - b;
+    return String(a).localeCompare(String(b), 'it', { numeric: true, sensitivity: 'base' });
+  }
+
+  function compareByKey(a, b, key) {
+    if (!key) return 0;
+    if (key === 'thread_size') {
+      const pa = parseThreadSize(a.thread_size);
+      const pb = parseThreadSize(b.thread_size);
+      const prefixDiff = compareValues(pa.prefix, pb.prefix);
+      if (prefixDiff !== 0) return prefixDiff;
+      return compareValues(pa.number, pb.number);
+    }
+    if (key === 'length_mm') return compareValues(a.length_mm, b.length_mm);
+    if (key === 'material') return compareValues(a.material, b.material);
+    if (key === 'subtype') return compareValues(a.subtype, b.subtype);
+    return 0;
+  }
+
+  function updatePreview() {
+    if (!previewList) return;
+    const keys = [
+      primaryKeySelect?.value,
+      secondaryKeySelect?.value,
+      tertiaryKeySelect?.value,
+      quaternaryKeySelect?.value,
+    ].filter(Boolean);
+    const sorted = [...sampleItems].sort((a, b) => {
+      for (const key of keys) {
+        const diff = compareByKey(a, b, key);
+        if (diff !== 0) return diff;
+      }
+      return 0;
+    });
+    previewList.innerHTML = sorted.map(item => {
+      const label = `${item.name} ${item.thread_size} L${item.length_mm} ${item.material}`;
+      return `<li>${escapeHtml(label)}</li>`;
+    }).join('');
+  }
+
+  [primaryKeySelect, secondaryKeySelect, tertiaryKeySelect, quaternaryKeySelect].forEach(sel => {
+    if (!sel) return;
+    sel.addEventListener('change', updatePreview);
+  });
+  updatePreview();
 
   if (form) {
     form.addEventListener('submit', function(ev){

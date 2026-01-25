@@ -555,6 +555,23 @@ def auto_name_for(item:Item)->str:
     if item.material: parts.append(item.material.name)
     return " ".join(parts)[:118]
 
+def shared_drawer_label(items: list[Item]) -> str | None:
+    if not items:
+        return None
+    parts = []
+    categories = {it.category.name for it in items if it.category}
+    if len(categories) == 1:
+        parts.append(next(iter(categories)))
+    subtypes = {it.subtype.name for it in items if it.subtype}
+    if len(subtypes) == 1:
+        parts.append(next(iter(subtypes)))
+    thread_sizes = {it.thread_size for it in items if it.thread_size}
+    if len(thread_sizes) == 1:
+        parts.append(next(iter(thread_sizes)))
+    if not parts:
+        return None
+    return " ".join(parts)[:80]
+
 def format_mm_short(value):
     """Restituisce un valore in mm come intero se possibile o con una singola cifra decimale."""
     if value is None:
@@ -1558,12 +1575,25 @@ def build_full_grid(cabinet_id:int):
                 "cat_id": None,
                 "label": slot_display_labels.get(key) or f"{s.col_code}{s.row_num}",
                 "label_custom": slot_display_custom.get(key, False),
+                "items": [],
+                "auto_label": False,
             }
 
     for a, s, it, cat in assigns:
         key = f"{s.col_code}-{s.row_num}"
         label = slot_display_labels.get(key) or f"{s.col_code}{s.row_num}"
-        cell = cells.get(key, {"blocked": False, "entries": [], "cat_id": None, "label": label, "label_custom": slot_display_custom.get(key, False)})
+        cell = cells.get(
+            key,
+            {
+                "blocked": False,
+                "entries": [],
+                "cat_id": None,
+                "label": label,
+                "label_custom": slot_display_custom.get(key, False),
+                "items": [],
+                "auto_label": False,
+            },
+        )
         text = short_cell_text(it)
         summary = text.replace("\n", " - ")
         color = cat.color if cat else "#999"
@@ -1578,6 +1608,7 @@ def build_full_grid(cabinet_id:int):
             "thread_size": it.thread_size,
             "main_measure": main_measure_info(it),
         })
+        cell["items"].append(it)
         if cell["cat_id"] is None and it.category_id:
             cell["cat_id"] = it.category_id
         if not cell.get("label"):
@@ -1593,6 +1624,8 @@ def build_full_grid(cabinet_id:int):
             "cat_id": None,
             "label": slot_display_labels.get(anchor_key) or f"{region['col_start']}{region['row_start']}",
             "label_custom": slot_display_custom.get(anchor_key, False),
+            "items": [],
+            "auto_label": False,
         }
         for col, row in merge_cells_from_region(region):
             key = f"{col}-{row}"
@@ -1604,6 +1637,8 @@ def build_full_grid(cabinet_id:int):
                     merged_cell["entries"].append(entry)
                     if merged_cell["cat_id"] is None:
                         merged_cell["cat_id"] = cell.get("cat_id")
+                for it in cell.get("items", []):
+                    merged_cell["items"].append(it)
                 if merged_cell["cat_id"] is None and cell.get("cat_id"):
                     merged_cell["cat_id"] = cell.get("cat_id")
                 if not merged_cell["label_custom"] and cell.get("label_custom"):
@@ -1611,6 +1646,16 @@ def build_full_grid(cabinet_id:int):
                     if cell.get("label"):
                         merged_cell["label"] = cell["label"]
         cells[anchor_key] = merged_cell
+
+    for cell in cells.values():
+        if cell.get("blocked") or cell.get("label_custom"):
+            continue
+        items = cell.get("items", [])
+        if items and len(items) > 1:
+            auto_label = shared_drawer_label(items)
+            if auto_label:
+                cell["label"] = auto_label
+                cell["auto_label"] = True
 
     return {
         "rows": rows, "cols": cols, "cells": cells,
@@ -3234,10 +3279,11 @@ def _sort_columns_for_key(key: str):
     sort_map = {
         "id": [Item.id],
         "thread_size": _thread_size_sort_columns(),
+        "subtype": [Subtype.name],
         "thickness_mm": [Item.thickness_mm],
         "length_mm": [Item.length_mm],
         "outer_d_mm": [Item.outer_d_mm],
-        "material": [Item.material_id],
+        "material": [Material.name],
     }
     return sort_map.get(key, [])
 
@@ -3249,6 +3295,8 @@ def _auto_assign_category(category_id: int,
                           direction: str,
                           primary_key: str,
                           secondary_key: str,
+                          tertiary_key: str,
+                          quaternary_key: str,
                           count: int,
                           clear_occupied: bool):
     """
@@ -3268,9 +3316,20 @@ def _auto_assign_category(category_id: int,
     q = Item.query.filter(Item.id.not_in(subq), Item.category_id == int(category_id))
 
     order_cols = []
-    order_cols.extend(_sort_columns_for_key(primary_key))
-    if secondary_key and secondary_key != primary_key:
-        order_cols.extend(_sort_columns_for_key(secondary_key))
+    sort_keys = [primary_key, secondary_key, tertiary_key, quaternary_key]
+    sort_keys = [k for k in sort_keys if k]
+
+    if "subtype" in sort_keys:
+        q = q.outerjoin(Subtype, Item.subtype_id == Subtype.id)
+    if "material" in sort_keys:
+        q = q.outerjoin(Material, Item.material_id == Material.id)
+
+    used = set()
+    for key in sort_keys:
+        if key in used:
+            continue
+        used.add(key)
+        order_cols.extend(_sort_columns_for_key(key))
     if not order_cols:
         order_cols = [Item.id]
     q = q.order_by(*order_cols)
@@ -3481,6 +3540,7 @@ def _placements_internal():
     categories = Category.query.order_by(Category.name).all()
     sort_options = [
         ("thread_size",  "Misura"),
+        ("subtype", "Sottotipo (forma)"),
         ("length_mm", "Lunghezza/Spessore (mm)"),
         ("outer_d_mm", "Ø esterno (mm)"),
         ("material",     "Materiale"),
@@ -3491,7 +3551,9 @@ def _placements_internal():
     form_cabinet_id  = request.args.get("cabinet_id", type=int)
     form_category_id = request.args.get("category_id", type=int)
     primary_key      = request.args.get("primary_key") or "thread_size"
-    secondary_key    = request.args.get("secondary_key") or "length_mm"
+    secondary_key    = request.args.get("secondary_key") or "subtype"
+    tertiary_key     = request.args.get("tertiary_key") or "length_mm"
+    quaternary_key   = request.args.get("quaternary_key") or "material"
     direction        = (request.args.get("direction") or "H").upper()
     count_val        = request.args.get("count", type=int) or 10
     start_col        = (request.args.get("start_col") or "").strip().upper()
@@ -3514,7 +3576,9 @@ def _placements_internal():
             return redirect(url_for(target_endpoint))
 
         primary_key    = form.get("primary_key") or primary_key or "thread_size"
-        secondary_key  = form.get("secondary_key") or secondary_key or "length_mm"
+        secondary_key  = form.get("secondary_key") or secondary_key or "subtype"
+        tertiary_key   = form.get("tertiary_key") or tertiary_key or "length_mm"
+        quaternary_key = form.get("quaternary_key") or quaternary_key or "material"
         direction      = (form.get("direction") or direction or "H").upper()
         count_raw = form.get("count")
         count_val = int(count_raw) if count_raw not in (None, "") else (count_val or 0)
@@ -3578,6 +3642,8 @@ def _placements_internal():
                 category_id=form_category_id or "",
                 primary_key=primary_key,
                 secondary_key=secondary_key,
+                tertiary_key=tertiary_key,
+                quaternary_key=quaternary_key,
                 direction=direction,
                 count=count_val,
                 start_col=start_col,
@@ -3593,6 +3659,8 @@ def _placements_internal():
                 category_id=form_category_id or "",
                 primary_key=primary_key,
                 secondary_key=secondary_key,
+                tertiary_key=tertiary_key,
+                quaternary_key=quaternary_key,
                 direction=direction,
                 count=count_val,
                 start_col=start_col,
@@ -3609,6 +3677,8 @@ def _placements_internal():
                 direction=direction,
                 primary_key=primary_key,
                 secondary_key=secondary_key,
+                tertiary_key=tertiary_key,
+                quaternary_key=quaternary_key,
                 count=count_val,
                 clear_occupied=clear_occupied,
             )
@@ -3641,6 +3711,8 @@ def _placements_internal():
             category_id=form_category_id,
             primary_key=primary_key,
             secondary_key=secondary_key,
+            tertiary_key=tertiary_key,
+            quaternary_key=quaternary_key,
             direction=direction,
             count=count_val,
             start_col=start_col,
@@ -3673,6 +3745,8 @@ def _placements_internal():
         form_category_id=form_category_id,
         primary_key=primary_key,
         secondary_key=secondary_key,
+        tertiary_key=tertiary_key,
+        quaternary_key=quaternary_key,
         direction=direction,
         count=count_val,
         start_col=start_col,
