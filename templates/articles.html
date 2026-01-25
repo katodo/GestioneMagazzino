@@ -5,7 +5,7 @@
     <h3 class="mb-1">Articoli</h3>
     <div class="text-muted small">Un'unica griglia per consultare e gestire il catalogo; accedi per modificare o aggiungere.</div>
   </div>
-  {% if is_admin %}
+  {% if can_manage_items %}
     <div class="d-flex flex-wrap gap-2">
       <a href="#newItemForm" class="btn btn-primary btn-sm">Nuovo articolo</a>
       <a href="{{ url_for('export_items_csv') }}" class="btn btn-outline-dark btn-sm">Esporta CSV</a>
@@ -44,7 +44,7 @@
   </div>
 </div>
 
-{% if is_admin %}
+{% if can_manage_items %}
 <div class="form-section mb-3" id="newItemForm">
   <h5 class="mb-2">Nuovo articolo</h5>
   <form method="post" action="{{ url_for('add_item') }}" class="needs-validation" novalidate>
@@ -211,7 +211,7 @@
 <div class="form-section">
   <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
     <h5 class="mb-0">Griglia articoli</h5>
-    {% if is_admin %}
+    {% if can_manage_items %}
       <div class="d-flex flex-wrap gap-2">
         <button class="btn btn-sm btn-primary" type="submit" form="labelForm" formaction="{{ url_for('labels_pdf') }}">Stampa etichette</button>
         <button class="btn btn-sm btn-outline-primary" type="submit" form="labelForm" formaction="{{ url_for('cards_pdf') }}">Stampa cartellini</button>
@@ -300,14 +300,14 @@
     </div>
   </form>
 
-  {% if is_admin %}
+  {% if can_manage_items %}
   <form id="labelForm" method="post" action="{{ url_for('labels_pdf') }}">
   {% endif %}
     <div class="table-responsive table-sticky">
       <table class="table table-striped table-hover align-middle mb-0" id="articlesTable">
         <thead>
           <tr>
-            {% if is_admin %}<th style="width:36px;"><input type="checkbox" id="chkAll"></th>{% endif %}
+            {% if can_manage_items %}<th style="width:36px;"><input type="checkbox" id="chkAll"></th>{% endif %}
             <th>ID</th>
             <th>Categoria</th>
             <th>Nome</th>
@@ -317,14 +317,14 @@
             <th>Materiale</th>
             <th>Q.ta</th>
             <th>Posizione</th>
-            {% if is_admin %}<th>Condiviso</th>
+            {% if can_manage_items %}<th>Condiviso</th>
             <th>Azione</th>{% endif %}
           </tr>
         </thead>
         <tbody>
           {% for it in items %}
-          <tr {% if is_admin %}data-edit-url="{{ url_for('edit_item', item_id=it.id) }}"{% endif %}>
-            {% if is_admin %}<td><input type="checkbox" name="item_ids" value="{{ it.id }}"></td>{% endif %}
+          <tr {% if can_manage_items %}data-edit-url="{{ url_for('edit_item', item_id=it.id) }}"{% endif %}>
+            {% if can_manage_items %}<td><input type="checkbox" name="item_ids" value="{{ it.id }}"></td>{% endif %}
             <td>{{ it.id }}</td>
             <td>{% if it.category %}<span class="badge-color" style="background:{{ it.category.color }}"></span>{{ it.category.name }}{% endif %}</td>
             <td>{{ compose_caption(it) }}</td>
@@ -349,7 +349,7 @@
               <span class="ms-2 fw-semibold">{{ it.quantity }}</span>
             </td>
             <td>{{ pos_by_item.get(it.id, '') }}</td>
-            {% if is_admin %}
+            {% if can_manage_items %}
             <td class="text-center">{% if it.share_drawer %}&#10003;{% endif %}</td>
             <td class="text-nowrap">
               <a href="{{ url_for('edit_item', item_id=it.id) }}" class="btn btn-sm btn-outline-primary">Modifica</a>
@@ -363,7 +363,7 @@
         </tbody>
       </table>
     </div>
-  {% if is_admin %}
+  {% if can_manage_items %}
   </form>
   {% endif %}
 </div>
@@ -442,7 +442,7 @@ function clearKeepParams(){
 document.addEventListener('DOMContentLoaded', ()=>{
   const tableSelector = '#articlesTable';
   const excludedSelectors = 'a, button, input, label, select';
-  const defaultOrder = {{ ([ [1, "asc"] ] if is_admin else [ [0, "asc"] ]) | tojson }};
+  const defaultOrder = {{ ([ [1, "asc"] ] if can_manage_items else [ [0, "asc"] ]) | tojson }};
   if ($.fn.DataTable) {
     $(tableSelector).DataTable({
       pageLength:25,
@@ -450,7 +450,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
       order: defaultOrder,
       language: { search: "Cerca nella tabella:" }
     });
-    {% if is_admin %}
+    {% if can_manage_items %}
     $(`${tableSelector} tbody`).on('click', 'tr', function(e){
       if ($(e.target).closest(excludedSelectors).length) return;
       const url = this.dataset.editUrl;
@@ -459,7 +459,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
     $(`${tableSelector} tbody tr`).addClass('cursor-pointer');
     {% endif %}
   } else {
-    {% if is_admin %}
+    {% if can_manage_items %}
     document.querySelectorAll(`${tableSelector} tbody tr`).forEach(row=>{
       row.classList.add('cursor-pointer');
       row.addEventListener('click', (e)=>{
@@ -470,7 +470,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
     });
     {% endif %}
   }
-  {% if is_admin %}
+  {% if can_manage_items %}
   document.getElementById('chkAll')?.addEventListener('change', (e)=>{
     document.querySelectorAll('input[name=\"item_ids\"]').forEach(cb=> cb.checked = e.target.checked);
   });
