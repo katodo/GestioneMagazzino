@@ -52,7 +52,7 @@ class User(UserMixin, db.Model):
     username = db.Column(db.String(50), unique=True, nullable=False)
     password = db.Column(db.String(128), nullable=False)
     role_id = db.Column(db.Integer, db.ForeignKey("role.id"), nullable=True)
-    role = db.relationship("Role", back_populates="users")
+    role = db.relationship("Role", back_populates="users", lazy="joined")
 
     def set_password(self, raw_password: str) -> None:
         self.password = generate_password_hash(raw_password)
@@ -65,9 +65,18 @@ class User(UserMixin, db.Model):
         return self.password == raw_password
 
     def has_permission(self, permission_key: str) -> bool:
-        if not self.role:
+        if not self.role_id:
             return False
-        return any(p.key == permission_key for p in self.role.permissions)
+        role = getattr(self, "role", None)
+        if role:
+            return any(p.key == permission_key for p in role.permissions)
+        return (
+            db.session.query(Permission.id)
+            .join(RolePermission, Permission.id == RolePermission.permission_id)
+            .filter(RolePermission.role_id == self.role_id, Permission.key == permission_key)
+            .first()
+            is not None
+        )
 
 class AnonymousUser(UserMixin):
     def has_permission(self, permission_key: str) -> bool:
