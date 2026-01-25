@@ -3151,7 +3151,7 @@ def _placements_internal():
     form_cabinet_id  = request.args.get("cabinet_id", type=int)
     form_category_id = request.args.get("category_id", type=int)
     primary_key      = request.args.get("primary_key") or "thread_size"
-    secondary_key    = request.args.get("secondary_key") or "material"
+    secondary_key    = request.args.get("secondary_key") or "length_mm"
     direction        = (request.args.get("direction") or "H").upper()
     count_val        = request.args.get("count", type=int) or 10
     start_col        = (request.args.get("start_col") or "").strip().upper()
@@ -3174,14 +3174,17 @@ def _placements_internal():
             return redirect(url_for(target_endpoint))
 
         primary_key    = form.get("primary_key") or primary_key or "thread_size"
-        secondary_key  = form.get("secondary_key") or ""
+        secondary_key  = form.get("secondary_key") or secondary_key or "length_mm"
         direction      = (form.get("direction") or direction or "H").upper()
-        count_val      = max(1, int(form.get("count") or (count_val or 1)))
+        count_raw = form.get("count")
+        count_val = int(count_raw) if count_raw not in (None, "") else (count_val or 0)
         start_col      = (form.get("start_col") or start_col or "").strip().upper()
         start_row_raw  = form.get("start_row")
         start_row      = int(start_row_raw) if (start_row_raw not in (None, "")) else start_row
         clear_occupied = bool(form.get("clear_occupied"))
         clear_scope    = (form.get("clear_scope") or "all").lower()
+        if action != "clear_category" or clear_scope == "range":
+            count_val = max(1, int(count_val or 1))
 
         if action == "clear_category":
             if not (form_cabinet_id and form_category_id):
