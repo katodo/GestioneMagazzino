@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from itertools import islice
 from functools import wraps
+import re
 from werkzeug.security import generate_password_hash, check_password_hash
 import json
 import os, io, csv
@@ -555,22 +556,44 @@ def auto_name_for(item:Item)->str:
     if item.material: parts.append(item.material.name)
     return " ".join(parts)[:118]
 
+def _name_tokens(value: str) -> list[str]:
+    cleaned = (value or "").strip()
+    if not cleaned:
+        return []
+    tokens = re.split(r"\s+", cleaned)
+    out = []
+    for token in tokens:
+        token = re.sub(r"^[^\wØø]+|[^\wØø]+$", "", token, flags=re.UNICODE)
+        if token:
+            out.append(token)
+    return out
+
 def shared_drawer_label(items: list[Item]) -> str | None:
-    if not items:
+    if not items or len(items) < 2:
         return None
-    parts = []
-    categories = {it.category.name for it in items if it.category}
-    if len(categories) == 1:
-        parts.append(next(iter(categories)))
-    subtypes = {it.subtype.name for it in items if it.subtype}
-    if len(subtypes) == 1:
-        parts.append(next(iter(subtypes)))
-    thread_sizes = {it.thread_size for it in items if it.thread_size}
-    if len(thread_sizes) == 1:
-        parts.append(next(iter(thread_sizes)))
-    if not parts:
+    names = []
+    for it in items:
+        base = (it.name or "").strip()
+        if not base:
+            base = auto_name_for(it)
+        if base:
+            names.append(base)
+    if len(names) < 2:
         return None
-    return " ".join(parts)[:80]
+    first_tokens = _name_tokens(names[0])
+    if not first_tokens:
+        return None
+    other_sets = [set(t.lower() for t in _name_tokens(name)) for name in names[1:]]
+    if not other_sets:
+        return None
+    common = []
+    for token in first_tokens:
+        token_key = token.lower()
+        if all(token_key in tokens for tokens in other_sets):
+            common.append(token)
+    if not common:
+        return None
+    return " ".join(common)[:80]
 
 def format_mm_short(value):
     """Restituisce un valore in mm come intero se possibile o con una singola cifra decimale."""
@@ -3439,6 +3462,16 @@ def _auto_assign_category(category_id: int,
         for item, col_code, row_num in assignments_plan:
             _assign_position(item, cab.id, col_code, row_num)
             assigned += 1
+        touched_cells = {(col_code, row_num) for _, col_code, row_num in assignments_plan}
+        for col_code, row_num in touched_cells:
+            anchor_slot, _, _, slot_items = _collect_region_assignments(cab.id, col_code, row_num)
+            auto_label = shared_drawer_label(slot_items)
+            if not auto_label:
+                continue
+            if not (anchor_slot.display_label_override or "").strip():
+                anchor_slot.display_label_override = auto_label
+            if not (anchor_slot.print_label_override or "").strip():
+                anchor_slot.print_label_override = auto_label
         db.session.commit()
     except Exception:
         db.session.rollback()
