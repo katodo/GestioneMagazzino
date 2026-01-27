@@ -79,7 +79,7 @@
                 <td class="cell-blocked" data-col="{{ col }}" data-row="{{ r }}" data-cat="blocked" data-label="{{ display_label }}" data-slot-id="{{ cell.slot_id }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>{{ cell_label }}</td>
               {% elif cell.entries and (cell.entries|length)>0 %}
                 {% set colhex = cell.entries[0].color %}
-                <td class="cell-used" style="background: {{ colhex }}" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" data-label="{{ display_label }}" data-items='{{ cell.entries|tojson }}' data-slot-id="{{ cell.slot_id }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
+                <td class="cell-used{% if cell.entries and (cell.entries|length) > 1 %} cell-multi{% endif %}" style="background: {{ colhex }}" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" data-label="{{ display_label }}" data-items='{{ cell.entries|tojson }}' data-slot-id="{{ cell.slot_id }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
                   <div class="cell-inner">
                     {% if cell_custom %}
                       <div class="cell-line fw-bold">{{ cell_label }}</div>

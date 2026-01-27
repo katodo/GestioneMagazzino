@@ -24,6 +24,8 @@ DEFAULT_LABEL_QR_SIZE_MM = 9
 DEFAULT_LABEL_QR_MARGIN_MM = 1
 DEFAULT_LABEL_POSITION_WIDTH_MM = 12
 DEFAULT_LABEL_POSITION_FONT_PT = 7.0
+DEFAULT_CARD_W_MM = 61
+DEFAULT_CARD_H_MM = 30
 DEFAULT_ORIENTATION_LANDSCAPE = True
 DEFAULT_QR_DEFAULT = True
 DEFAULT_QR_BASE_URL = None  # es. "https://magazzino.local"
@@ -128,6 +130,8 @@ class Settings(db.Model):
     label_qr_margin_mm = db.Column(db.Float, nullable=False, default=DEFAULT_LABEL_QR_MARGIN_MM)
     label_position_width_mm = db.Column(db.Float, nullable=False, default=DEFAULT_LABEL_POSITION_WIDTH_MM)
     label_position_font_pt = db.Column(db.Float, nullable=False, default=DEFAULT_LABEL_POSITION_FONT_PT)
+    card_w_mm = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_W_MM)
+    card_h_mm = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_H_MM)
     orientation_landscape = db.Column(db.Boolean, nullable=False, default=DEFAULT_ORIENTATION_LANDSCAPE)
     qr_default = db.Column(db.Boolean, nullable=False, default=DEFAULT_QR_DEFAULT)
     qr_base_url = db.Column(db.String(200), nullable=True)
@@ -745,6 +749,8 @@ def ensure_settings_columns():
         ("label_qr_margin_mm", "REAL", DEFAULT_LABEL_QR_MARGIN_MM),
         ("label_position_width_mm", "REAL", DEFAULT_LABEL_POSITION_WIDTH_MM),
         ("label_position_font_pt", "REAL", DEFAULT_LABEL_POSITION_FONT_PT),
+        ("card_w_mm", "REAL", DEFAULT_CARD_W_MM),
+        ("card_h_mm", "REAL", DEFAULT_CARD_H_MM),
     ]
     added = False
     for col_name, col_type, default_val in new_cols:
@@ -917,6 +923,8 @@ def get_settings()->Settings:
                      label_qr_margin_mm=DEFAULT_LABEL_QR_MARGIN_MM,
                      label_position_width_mm=DEFAULT_LABEL_POSITION_WIDTH_MM,
                      label_position_font_pt=DEFAULT_LABEL_POSITION_FONT_PT,
+                     card_w_mm=DEFAULT_CARD_W_MM,
+                     card_h_mm=DEFAULT_CARD_H_MM,
                      orientation_landscape=DEFAULT_ORIENTATION_LANDSCAPE,
                      qr_default=DEFAULT_QR_DEFAULT,
                      qr_base_url=DEFAULT_QR_BASE_URL)
@@ -927,6 +935,8 @@ def get_settings()->Settings:
     if s.label_qr_margin_mm is None: s.label_qr_margin_mm = DEFAULT_LABEL_QR_MARGIN_MM; changed = True
     if s.label_position_width_mm is None: s.label_position_width_mm = DEFAULT_LABEL_POSITION_WIDTH_MM; changed = True
     if s.label_position_font_pt is None: s.label_position_font_pt = DEFAULT_LABEL_POSITION_FONT_PT; changed = True
+    if s.card_w_mm is None: s.card_w_mm = DEFAULT_CARD_W_MM; changed = True
+    if s.card_h_mm is None: s.card_h_mm = DEFAULT_CARD_H_MM; changed = True
     if changed:
         db.session.commit()
     return s
@@ -2771,6 +2781,8 @@ def update_settings():
         s.label_qr_margin_mm = float(request.form.get("label_qr_margin_mm"))
         s.label_position_width_mm = float(request.form.get("label_position_width_mm"))
         s.label_position_font_pt = float(request.form.get("label_position_font_pt"))
+        s.card_w_mm = float(request.form.get("card_w_mm"))
+        s.card_h_mm = float(request.form.get("card_h_mm"))
         s.orientation_landscape = bool(request.form.get("orientation_landscape"))
         s.qr_default  = bool(request.form.get("qr_default"))
         url = request.form.get("qr_base_url","").strip()
@@ -4107,6 +4119,13 @@ def labels_pdf():
         y = y0 - row * (lab_h + gap)
 
         crop_marks(x, y, lab_w, lab_h)
+        try:
+            colhex = entry.get("color") or "#000000"
+            c.setStrokeColor(HexColor(colhex))
+            c.setLineWidth(0.8)
+            c.rect(x, y, lab_w, lab_h, stroke=1, fill=0)
+        except Exception:
+            pass
 
         pos_data = entry.get("position") or (None, None)
         cab, slot = pos_data
@@ -4162,14 +4181,6 @@ def labels_pdf():
                     c.drawString(pos_x, line_y, txt)
                     line_y -= pos_line_height
             continue
-
-        # Barra colore categoria in alto
-        try:
-            colhex = entry.get("color") or "#000000"
-            c.setFillColor(HexColor(colhex))
-            c.rect(x, y + lab_h - 2, lab_w, 2, stroke=0, fill=1)
-        except Exception:
-            pass
 
         c.setFillColorRGB(0, 0, 0)
 
@@ -4326,16 +4337,20 @@ def cards_pdf():
     pos_by_item = {item_id: (cab, slot) for item_id, cab, slot in assignments}
 
     page_size = portrait(A4)
+    s = get_settings()
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=page_size)
     page_w, page_h = page_size
 
     margin = mm_to_pt(12)
     gap = mm_to_pt(6)
-    cols = 2
-    card_w = (page_w - (2 * margin) - gap) / cols
-    card_h = mm_to_pt(80)
-    rows = max(1, int((page_h - 2 * margin + gap) // (card_h + gap)))
+    card_w = mm_to_pt(getattr(s, "card_w_mm", DEFAULT_CARD_W_MM) or DEFAULT_CARD_W_MM)
+    card_h = mm_to_pt(getattr(s, "card_h_mm", DEFAULT_CARD_H_MM) or DEFAULT_CARD_H_MM)
+    cols = int((page_w - 2 * margin + gap) // (card_w + gap))
+    rows = int((page_h - 2 * margin + gap) // (card_h + gap))
+    if cols < 1 or rows < 1:
+        flash("Configurazione cartellini non valida rispetto al formato A4.", "danger")
+        return redirect(request.referrer or url_for("admin_items"))
     padding = mm_to_pt(5)
 
     def _fmt_mm(v):
@@ -4417,18 +4432,19 @@ def cards_pdf():
                 cy -= 2
 
         qty_line = f"Quantità: {item.quantity}"
-        share_line = f"Condivisione cassetto: {'SI' if item.share_drawer else 'NO'}"
         c.setFont("Helvetica-Bold", 9.5)
         cy -= 12
         c.drawString(x + padding, cy, qty_line)
-        cy -= 11
-        c.drawString(x + padding, cy, share_line)
 
         pos_data = pos_by_item.get(item.id)
         if pos_data:
             cab, slot = pos_data
             cy -= 12
-            c.drawString(x + padding, cy, f"Posizione: {slot_full_label(cab, slot, for_print=True)}")
+            cab_name = cab.name if cab else ""
+            col_code = getattr(slot, "col_code", "") if slot else ""
+            row_num = getattr(slot, "row_num", None) if slot else None
+            pos_label = make_full_position(cab_name, col_code, row_num)
+            c.drawString(x + padding, cy, f"Posizione: {pos_label}")
 
     c.save()
     buf.seek(0)
@@ -4451,6 +4467,7 @@ def seed_if_empty_or_missing():
             label_qr_size_mm=DEFAULT_LABEL_QR_SIZE_MM, label_qr_margin_mm=DEFAULT_LABEL_QR_MARGIN_MM,
             label_position_width_mm=DEFAULT_LABEL_POSITION_WIDTH_MM,
             label_position_font_pt=DEFAULT_LABEL_POSITION_FONT_PT,
+            card_w_mm=DEFAULT_CARD_W_MM, card_h_mm=DEFAULT_CARD_H_MM,
             orientation_landscape=DEFAULT_ORIENTATION_LANDSCAPE,
             qr_default=DEFAULT_QR_DEFAULT, qr_base_url=DEFAULT_QR_BASE_URL
         ))
