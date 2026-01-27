@@ -35,6 +35,15 @@ DEFAULT_MQTT_RETAIN = False
 
 def mm_to_pt(mm): return mm * 2.8346456693
 
+def _safe_next_url(next_url: Optional[str]) -> Optional[str]:
+    if not next_url:
+        return None
+    if not next_url.startswith("/"):
+        return None
+    if next_url.startswith("//") or "://" in next_url:
+        return None
+    return next_url
+
 # ===================== FLASK & DB =====================
 app = Flask(__name__, instance_relative_config=True)
 app.config['SECRET_KEY'] = "supersecret"
@@ -1502,6 +1511,9 @@ def _render_articles_page():
 
     can_manage_items = current_user.is_authenticated and current_user.has_permission("manage_items")
     can_manage_placements = current_user.is_authenticated and current_user.has_permission("manage_placements")
+    current_url = request.full_path
+    if current_url.endswith("?"):
+        current_url = current_url[:-1]
     return render_template("articles.html",
         items=items, categories=categories, materials=materials, finishes=finishes,
         locations=locations, cabinets=cabinets,
@@ -1523,6 +1535,7 @@ def _render_articles_page():
         stock_filter=stock_filter,
         measure_q=measure_q,
         measure_labels=measure_labels,
+        current_url=current_url,
     )
 
 @app.route("/")
@@ -1574,10 +1587,12 @@ def build_full_grid(cabinet_id:int):
     )
     slot_display_labels = {}
     slot_display_custom = {}
+    slot_id_by_key = {}
     for s in slot_rows:
         key = f"{s.col_code}-{s.row_num}"
         slot_display_labels[key] = slot_label(s, for_display=True)
         slot_display_custom[key] = bool((s.display_label_override or "").strip())
+        slot_id_by_key[key] = s.id
 
     assigns = (
         db.session.query(Assignment, Slot, Item, Category)
@@ -1590,17 +1605,17 @@ def build_full_grid(cabinet_id:int):
 
     cells = {}
     for s in slot_rows:
-        if s.is_blocked:
-            key = f"{s.col_code}-{s.row_num}"
-            cells[key] = {
-                "blocked": True,
-                "entries": [],
-                "cat_id": None,
-                "label": slot_display_labels.get(key) or f"{s.col_code}{s.row_num}",
-                "label_custom": slot_display_custom.get(key, False),
-                "items": [],
-                "auto_label": False,
-            }
+        key = f"{s.col_code}-{s.row_num}"
+        cells[key] = {
+            "blocked": bool(s.is_blocked),
+            "entries": [],
+            "cat_id": None,
+            "label": slot_display_labels.get(key) or f"{s.col_code}{s.row_num}",
+            "label_custom": slot_display_custom.get(key, False),
+            "items": [],
+            "auto_label": False,
+            "slot_id": s.id,
+        }
 
     for a, s, it, cat in assigns:
         key = f"{s.col_code}-{s.row_num}"
@@ -1615,6 +1630,7 @@ def build_full_grid(cabinet_id:int):
                 "label_custom": slot_display_custom.get(key, False),
                 "items": [],
                 "auto_label": False,
+                "slot_id": s.id,
             },
         )
         text = short_cell_text(it)
@@ -1649,6 +1665,7 @@ def build_full_grid(cabinet_id:int):
             "label_custom": slot_display_custom.get(anchor_key, False),
             "items": [],
             "auto_label": False,
+            "slot_id": slot_id_by_key.get(anchor_key),
         }
         for col, row in merge_cells_from_region(region):
             key = f"{col}-{row}"
@@ -1699,6 +1716,7 @@ def cassettiere():
     subq = select(Assignment.item_id)
     unplaced_json = []
     can_manage_placements = current_user.is_authenticated and current_user.has_permission("manage_placements")
+    can_manage_items = current_user.is_authenticated and current_user.has_permission("manage_items")
     if can_manage_placements:
         unplaced = Item.query.filter(Item.id.not_in(subq)).all()
         unplaced_json = [
@@ -1714,6 +1732,7 @@ def cassettiere():
         grid=grid,
         unplaced_json=unplaced_json,
         can_manage_placements=can_manage_placements,
+        can_manage_items=can_manage_items,
     )
 
 def short_cell_text(item: Item) -> str:
@@ -1938,6 +1957,7 @@ def add_item():
 @login_required
 def edit_item(item_id):
     item = Item.query.get_or_404(item_id)
+    next_url = _safe_next_url(request.values.get("next"))
     if request.method == "POST":
         f = request.form
         try:
@@ -1970,6 +1990,8 @@ def edit_item(item_id):
         save_custom_field_values(item, f)
         db.session.commit()
         flash("Articolo aggiornato", "success")
+        if next_url:
+            return redirect(url_for("edit_item", item_id=item.id, next=next_url))
         return redirect(url_for("edit_item", item_id=item.id))
 
     categories = Category.query.order_by(Category.name).all()
@@ -2011,7 +2033,8 @@ def edit_item(item_id):
         measure_labels=measure_labels,
         current_cabinet_id=current_cabinet_id,
         current_col_code=current_col_code,
-        current_row_num=current_row_num
+        current_row_num=current_row_num,
+        next_url=next_url,
     )
 
 @app.route("/admin/items/<int:item_id>/delete", methods=["POST"])
@@ -2022,6 +2045,9 @@ def delete_item(item_id):
     db.session.delete(item)
     db.session.commit()
     flash("Articolo eliminato", "success")
+    next_url = _safe_next_url(request.values.get("next"))
+    if next_url:
+        return redirect(next_url)
     return redirect(url_for("admin_items"))
 
 # ---- Posizione item ----
@@ -3768,6 +3794,7 @@ def _placements_internal():
         unplaced_count = unplaced_by_category.get(form_category_id, 0)
     items_to_place = Item.query.filter(Item.id.not_in(subq)).all()
 
+    can_manage_placements = current_user.is_authenticated and current_user.has_permission("manage_placements")
     return render_template(
         "admin/placements.html",
         cabinets=cabinets,
@@ -3788,6 +3815,7 @@ def _placements_internal():
         unplaced_count=unplaced_count,
         unplaced_by_category=unplaced_by_category,
         items_to_place=items_to_place,
+        can_manage_placements=can_manage_placements,
     )
 
 @app.route("/admin/posizionamento", methods=["GET", "POST"])
@@ -3849,7 +3877,15 @@ def labels_pdf():
         flash("Per la stampa etichette installa reportlab: pip install reportlab", "danger")
         return redirect(request.referrer or url_for("admin_items"))
 
+    slot_ids = [int(x) for x in request.form.getlist("slot_ids") if str(x).isdigit()]
     ids = request.form.getlist("item_ids")
+    if slot_ids:
+        ids = [
+            row[0]
+            for row in db.session.query(Assignment.item_id)
+            .filter(Assignment.slot_id.in_(slot_ids))
+            .all()
+        ]
     if not ids:
         ids = [row[0] for row in db.session.query(Item.id).all()]
     items = Item.query.filter(Item.id.in_(ids)).order_by(Item.id).all()
@@ -4261,7 +4297,15 @@ def cards_pdf():
         flash("Per la stampa cartellini installa reportlab: pip install reportlab", "danger")
         return redirect(request.referrer or url_for("admin_items"))
 
+    slot_ids = [int(x) for x in request.form.getlist("slot_ids") if str(x).isdigit()]
     ids = request.form.getlist("item_ids")
+    if slot_ids:
+        ids = [
+            row[0]
+            for row in db.session.query(Assignment.item_id)
+            .filter(Assignment.slot_id.in_(slot_ids))
+            .all()
+        ]
     if not ids:
         ids = [row[0] for row in db.session.query(Item.id).all()]
     items = Item.query.options(

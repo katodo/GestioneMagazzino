@@ -2,6 +2,9 @@
 {% block content %}
 <h3>Modifica articolo #{{ item.id }}</h3>
 <form method="post" class="form-section needs-validation" novalidate>
+  {% if next_url %}
+    <input type="hidden" name="next" value="{{ next_url }}">
+  {% endif %}
   <div class="row g-2">
     <div class="col-md-4 field-block" data-field-key="category_id">
       <label class="form-label">Categoria</label>
@@ -167,7 +170,7 @@
 
     <div class="col-12 text-end mt-3">
       <button class="btn btn-primary">Salva modifiche</button>
-      <a href="{{ url_for('admin_items') }}" class="btn btn-secondary">Chiudi</a>
+      <a href="{{ next_url or url_for('admin_items') }}" class="btn btn-secondary">Chiudi</a>
     </div>
   </div>
 </form>

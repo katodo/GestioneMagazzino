@@ -7,8 +7,20 @@
     <h3 class="mb-1">Casssettiere</h3>
     <div class="text-muted small">Visualizza e gestisci la griglia della cassettiera con maggiore spazio sullo schermo.</div>
   </div>
-  <div class="d-flex flex-wrap gap-2">
+  <div class="d-flex flex-wrap gap-2 align-items-center">
     <a href="{{ url_for('articles') }}" class="btn btn-outline-secondary btn-sm">Vai agli articoli</a>
+    {% if can_manage_items %}
+    <form id="drawerPrintForm" method="post" class="d-flex flex-wrap gap-2 align-items-center">
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="printModeToggle">
+        <label class="form-check-label small" for="printModeToggle">Seleziona cassetti da stampare</label>
+      </div>
+      <div class="small text-muted">Selezionati: <span id="selectedDrawerCount">0</span></div>
+      <button class="btn btn-sm btn-primary" type="submit" formaction="{{ url_for('labels_pdf') }}">Stampa etichette</button>
+      <button class="btn btn-sm btn-outline-primary" type="submit" formaction="{{ url_for('cards_pdf') }}">Stampa cartellini</button>
+      <button class="btn btn-sm btn-outline-secondary" type="button" id="clearDrawerSelection">Svuota</button>
+    </form>
+    {% endif %}
   </div>
 </div>
 
@@ -59,15 +71,15 @@
               {% set display_label = first_entry.name if first_entry.name else first_entry.text %}
             {% endif %}
             {% if not cell %}
-              <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="" data-label="{{ cell_label }}">
+              <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="" data-label="{{ cell_label }}" data-slot-id="">
                 <div class="cell-inner">{{ cell_label }}</div>
               </td>
             {% else %}
               {% if cell.blocked %}
-                <td class="cell-blocked" data-col="{{ col }}" data-row="{{ r }}" data-cat="blocked" data-label="{{ display_label }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>{{ cell_label }}</td>
+                <td class="cell-blocked" data-col="{{ col }}" data-row="{{ r }}" data-cat="blocked" data-label="{{ display_label }}" data-slot-id="{{ cell.slot_id }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>{{ cell_label }}</td>
               {% elif cell.entries and (cell.entries|length)>0 %}
                 {% set colhex = cell.entries[0].color %}
-                <td class="cell-used" style="background: {{ colhex }}" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" data-label="{{ display_label }}" data-items='{{ cell.entries|tojson }}' {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
+                <td class="cell-used" style="background: {{ colhex }}" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" data-label="{{ display_label }}" data-items='{{ cell.entries|tojson }}' data-slot-id="{{ cell.slot_id }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
                   <div class="cell-inner">
                     {% if cell_custom %}
                       <div class="cell-line fw-bold">{{ cell_label }}</div>
@@ -79,7 +91,7 @@
                   </div>
                 </td>
               {% else %}
-                <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="" data-label="{{ display_label }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
+                <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="" data-label="{{ display_label }}" data-slot-id="{{ cell.slot_id }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
                   <div class="cell-inner">{{ cell_label }}</div>
                 </td>
                 {% endif %}
@@ -439,11 +451,58 @@ function initCellPopovers(gridId){
   });
 }
 
+const selectedDrawerIds = new Set();
+function updateDrawerSelectionCount(){
+  const countEl = document.getElementById('selectedDrawerCount');
+  if (countEl) countEl.textContent = selectedDrawerIds.size;
+}
+function clearDrawerSelection(){
+  selectedDrawerIds.clear();
+  document.querySelectorAll('#grid td.table-primary').forEach(td => td.classList.remove('table-primary'));
+  updateDrawerSelectionCount();
+}
+function toggleDrawerSelection(td){
+  const slotId = td?.dataset?.slotId;
+  if (!slotId) return;
+  if (selectedDrawerIds.has(slotId)) {
+    selectedDrawerIds.delete(slotId);
+    td.classList.remove('table-primary');
+  } else {
+    selectedDrawerIds.add(slotId);
+    td.classList.add('table-primary');
+  }
+  updateDrawerSelectionCount();
+}
+
 document.addEventListener('DOMContentLoaded', function(){
   const grid = document.getElementById('grid');
   if (!grid) return;
   let pendingUsedCell = null;
   initCellPopovers('grid');
+
+  const printModeToggle = document.getElementById('printModeToggle');
+  document.getElementById('clearDrawerSelection')?.addEventListener('click', clearDrawerSelection);
+  if (printModeToggle) {
+    printModeToggle.addEventListener('change', () => {
+      if (!printModeToggle.checked) {
+        clearDrawerSelection();
+      }
+    });
+  }
+  const drawerPrintForm = document.getElementById('drawerPrintForm');
+  if (drawerPrintForm) {
+    drawerPrintForm.addEventListener('submit', () => {
+      drawerPrintForm.querySelectorAll('input[name="slot_ids"]').forEach(el => el.remove());
+      selectedDrawerIds.forEach(id => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'slot_ids';
+        input.value = id;
+        drawerPrintForm.appendChild(input);
+      });
+    });
+  }
+  updateDrawerSelectionCount();
 
   {% if can_manage_placements %}
   const assignModalEl = document.getElementById('assignModal');
@@ -469,6 +528,11 @@ document.addEventListener('DOMContentLoaded', function(){
 
     if (!col || !row) return;
     if (cat === 'blocked') { alert('Cella bloccata.'); return; }
+
+    if (printModeToggle?.checked) {
+      toggleDrawerSelection(td);
+      return;
+    }
 
     publishSlotMqtt(col, row);
 
