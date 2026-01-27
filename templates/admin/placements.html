@@ -142,7 +142,7 @@
 
 <div class="grid-wrap p-2 bg-white">
   {% if grid.rows and grid.cols %}
-  <table class="grid-table" id="autoGrid">
+  <table class="grid-table" id="autoGrid" data-cab="{{ grid.cab.id if grid.cab else '' }}">
     <thead>
       <tr>
         <th class="rowhdr">r\\c</th>
@@ -169,17 +169,17 @@
               {% set display_label = first_entry.name if first_entry.name else first_entry.text %}
             {% endif %}
             {% if not cell %}
-              <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="">
+              <td class="cell-empty" data-col="{{ col }}" data-row="{{ r }}" data-cat="" data-label="{{ cell_label }}" data-slot-id="">
                 <div class="cell-inner">{{ cell_label }}</div>
               </td>
             {% else %}
               {% if cell.blocked %}
-                <td class="cell-blocked" data-col="{{ col }}" data-row="{{ r }}" data-cat="blocked" data-label="{{ display_label }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
+                <td class="cell-blocked" data-col="{{ col }}" data-row="{{ r }}" data-cat="blocked" data-label="{{ display_label }}" data-slot-id="{{ cell.slot_id }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
                   <div class="cell-inner">{{ cell_label }}</div>
                 </td>
               {% else %}
                 {% set bg = cell.entries[0].color if cell.entries else '#6c757d' %}
-                <td class="cell-used" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" data-items='{{ cell.entries|tojson }}' data-label="{{ display_label }}" style="background:{{ bg }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
+                <td class="cell-used" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" data-items='{{ cell.entries|tojson }}' data-label="{{ display_label }}" data-slot-id="{{ cell.slot_id }}" style="background:{{ bg }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
                   <div class="cell-inner">
                     {% if cell_custom %}
                       <div class="cell-line fw-bold">{{ cell_label }}</div>
@@ -205,6 +205,70 @@
     <div class="text-muted p-3">Nessuna cassettiera selezionata.</div>
   {% endif %}
 </div>
+
+{% if can_manage_placements %}
+<!-- Modal contenuto cella -->
+<div class="modal fade slot-modal" id="slotModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Contenuto cella <span id="slotLabel2"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Chiudi"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="slot_cab_id" value="{{ grid.cab.id if grid.cab else '' }}">
+        <input type="hidden" id="slot_col_code">
+        <input type="hidden" id="slot_row_num">
+        <div id="slotEmptyMsg" class="text-muted small d-none">Nessun articolo assegnato a questa cella.</div>
+        <table class="table table-sm align-middle mb-0" id="slotItemsTable">
+          <thead>
+            <tr><th>Articolo</th><th>Pos.</th><th>Q.ta</th><th>Azioni</th></tr>
+          </thead>
+          <tbody id="slotItemsBody"></tbody>
+        </table>
+        <div id="slotError" class="text-danger small mt-2 d-none"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" id="btnSlotLabelFromSlot">Nome cassetto…</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Chiudi</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal override nome cassetto -->
+<div class="modal fade" id="slotLabelModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="slotLabelForm">
+        <div class="modal-header">
+          <h5 class="modal-title">Nome cassetto <span id="slotLabelTitle"></span></h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Chiudi"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" name="cabinet_id" id="slotLabelCabId" value="{{ grid.cab.id if grid.cab else '' }}">
+          <input type="hidden" name="col_code" id="slotLabelCol">
+          <input type="hidden" name="row_num" id="slotLabelRow">
+          <div class="mb-3">
+            <label class="form-label">Visualizzazione cassettiera</label>
+            <input type="text" class="form-control" name="display_label" id="slotLabelDisplay" placeholder="Lascia vuoto per usare la sigla standard">
+            <div class="form-text">Default: <span id="slotLabelDefault"></span></div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Stampa etichette</label>
+            <input type="text" class="form-control" name="print_label" id="slotLabelPrint" placeholder="Lascia vuoto per usare la sigla standard">
+          </div>
+          <div class="alert alert-danger d-none" id="slotLabelError"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-primary">Salva</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Chiudi</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
 
 <div class="form-section mt-3">
   <div class="d-flex align-items-center justify-content-between mb-2 flex-wrap gap-2">
@@ -286,6 +350,154 @@ document.addEventListener('DOMContentLoaded', function(){
     });
   }
 
+  const SLOT_ITEMS_URL = '{{ url_for("slot_items") }}';
+  const CLEAR_URL_TEMPLATE = '{{ url_for("slot_clear_item", item_id=0) }}';
+  const SLOT_LABEL_URL = '{{ url_for("slot_label_endpoint") }}';
+
+  async function openSlotLabelModal(col, row){
+    const grid = document.getElementById('autoGrid');
+    const cabId = grid?.dataset?.cab;
+    const modalRoot = document.getElementById('slotLabelModal');
+    if (!modalRoot) return;
+    const errEl = document.getElementById('slotLabelError');
+    if (errEl) {
+      errEl.classList.add('d-none');
+      errEl.textContent = '';
+    }
+    if (!cabId || !col || !row) {
+      alert('Seleziona prima una cassettiera e una cella.');
+      return;
+    }
+    try {
+      const resp = await fetch(`${SLOT_LABEL_URL}?cabinet_id=${encodeURIComponent(cabId)}&col_code=${encodeURIComponent(col)}&row_num=${encodeURIComponent(row)}`);
+      const j = await resp.json().catch(()=>({ok:false}));
+      if (!resp.ok || !j.ok) {
+        alert(j.error || 'Errore nel caricamento del nome cassetto.');
+        return;
+      }
+      document.getElementById('slotLabelCol').value = col;
+      document.getElementById('slotLabelRow').value = row;
+      document.getElementById('slotLabelCabId').value = cabId;
+      document.getElementById('slotLabelDisplay').value = j.display_label || '';
+      document.getElementById('slotLabelPrint').value = j.print_label || '';
+      document.getElementById('slotLabelDefault').textContent = j.default_label || `${col}${row}`;
+      document.getElementById('slotLabelTitle').textContent = j.effective_display_label || `${col}${row}`;
+      const modal = new bootstrap.Modal(modalRoot);
+      modal.show();
+    } catch (e) {
+      alert('Errore di comunicazione.');
+    }
+  }
+
+  function openSlotModal(col, row, labelText){
+    const grid = document.getElementById('autoGrid');
+    const cabId = grid?.dataset?.cab;
+    if (!cabId) return;
+
+    const modalEl = document.getElementById('slotModal');
+    if (!modalEl) return;
+    const modal = new bootstrap.Modal(modalEl);
+
+    document.getElementById('slotLabel2').textContent = labelText || `${col}${row}`;
+    document.getElementById('slot_col_code').value = col;
+    document.getElementById('slot_row_num').value = row;
+    document.getElementById('slotError').classList.add('d-none');
+    document.getElementById('slotEmptyMsg').classList.add('d-none');
+
+    const tbody = document.getElementById('slotItemsBody');
+    tbody.innerHTML = '<tr><td colspan="4"><small class="text-muted">Caricamento...</small></td></tr>';
+
+    fetch(`${SLOT_ITEMS_URL}?cabinet_id=${encodeURIComponent(cabId)}&col_code=${encodeURIComponent(col)}&row_num=${encodeURIComponent(row)}`)
+      .then(r => r.json())
+      .then(j => {
+        tbody.innerHTML = '';
+        if (!j.ok) {
+          document.getElementById('slotError').textContent = j.error || 'Errore caricamento contenuto.';
+          document.getElementById('slotError').classList.remove('d-none');
+          return;
+        }
+        const lbl2 = document.getElementById('slotLabel2');
+        if (lbl2) {
+          lbl2.textContent = j.slot_label_display || labelText || `${col}${row}`;
+        }
+        if (!j.items || !j.items.length) {
+          document.getElementById('slotEmptyMsg').classList.remove('d-none');
+          return;
+        }
+
+        j.items.forEach(it => {
+          const tr = document.createElement('tr');
+
+          const tdName = document.createElement('td');
+          const measureInfo = (it.main_measure && it.main_measure.value)
+            ? `${it.main_measure.label || (it.main_measure.mode === 'thickness' ? 'Spessore' : 'Lunghezza')}: ${it.main_measure.value} mm`
+            : null;
+          tdName.innerHTML = `
+            <div class="d-flex align-items-start">
+              <span class="badge-color flex-shrink-0 mt-1" style="background:${it.color};"></span>
+              <div class="ms-2">
+                <div class="fw-semibold">${escapeHtml(it.name)}</div>
+                ${measureInfo ? `<div class="text-muted small">${escapeHtml(measureInfo)}</div>` : ''}
+              </div>
+            </div>`;
+
+          const tdPos = document.createElement('td');
+          tdPos.textContent = it.position_code || it.position || '';
+
+          const tdQty = document.createElement('td');
+          tdQty.textContent = (it.quantity !== null && it.quantity !== undefined) ? it.quantity : '';
+
+          const tdActions = document.createElement('td');
+          tdActions.className = 'text-nowrap';
+          tdActions.innerHTML = `
+            <button type="button" class="btn btn-sm btn-outline-primary me-1" data-edit-id="${it.id}">Modifica</button>
+            <button type="button" class="btn btn-sm btn-outline-danger" data-remove-id="${it.id}">Rimuovi posizione</button>
+          `;
+
+          tr.appendChild(tdName);
+          tr.appendChild(tdPos);
+          tr.appendChild(tdQty);
+          tr.appendChild(tdActions);
+          tbody.appendChild(tr);
+        });
+
+        tbody.querySelectorAll('button[data-edit-id]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const id = btn.getAttribute('data-edit-id');
+            window.location.href = '/admin/items/' + id + '/edit';
+          });
+        });
+
+        tbody.querySelectorAll('button[data-remove-id]').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const id = btn.getAttribute('data-remove-id');
+            if (!confirm('Rimuovere la posizione per questo articolo?')) return;
+            try {
+              const url = CLEAR_URL_TEMPLATE.replace('0', id);
+              const resp = await fetch(url, { method: 'POST' });
+              const jj = await resp.json().catch(()=>({ok:false}));
+              if (!jj.ok) {
+                alert(jj.error || 'Errore nella rimozione.');
+                return;
+              }
+              const inst = bootstrap.Modal.getInstance(modalEl);
+              if (inst) inst.hide();
+              location.reload();
+            } catch (e) {
+              alert('Errore di comunicazione.');
+            }
+          });
+        });
+      })
+      .catch(() => {
+        tbody.innerHTML = '';
+        document.getElementById('slotError').textContent = 'Errore di comunicazione.';
+        document.getElementById('slotError').classList.remove('d-none');
+      });
+
+    modal.show();
+  }
+
   const categorySelect = document.getElementById('categorySelect');
   const countInput = document.getElementById('countInput');
   const unplacedCount = document.getElementById('unplacedCount');
@@ -302,6 +514,7 @@ document.addEventListener('DOMContentLoaded', function(){
   const grid = document.getElementById('autoGrid');
   if (grid) {
     initCellPopovers('autoGrid');
+    let pendingUsedCell = null;
     grid.addEventListener('click', function(e){
       const td = e.target.closest('td');
       if (!td) return;
@@ -311,11 +524,66 @@ document.addEventListener('DOMContentLoaded', function(){
       }
       const col = td.dataset.col;
       const row = td.dataset.row;
+      const label = td.dataset.label;
       if (!col || !row) return;
       if (startColInput) startColInput.value = col;
       if (startRowInput) startRowInput.value = row;
       grid.querySelectorAll('td').forEach(c => c.classList.remove('table-primary'));
       td.classList.add('table-primary');
+
+      if (td.classList.contains('cell-used')) {
+        const cellKey = `${col}-${row}`;
+        if (pendingUsedCell === cellKey) {
+          pendingUsedCell = null;
+          openSlotModal(col, row, label);
+        } else {
+          pendingUsedCell = cellKey;
+        }
+      } else {
+        pendingUsedCell = null;
+      }
+    });
+  }
+
+  const btnSlotLabelFromSlot = document.getElementById('btnSlotLabelFromSlot');
+  if (btnSlotLabelFromSlot) {
+    btnSlotLabelFromSlot.addEventListener('click', () => {
+      const col = document.getElementById('slot_col_code').value;
+      const row = document.getElementById('slot_row_num').value;
+      if (!col || !row) return;
+      openSlotLabelModal(col, row);
+    });
+  }
+
+  const slotLabelForm = document.getElementById('slotLabelForm');
+  if (slotLabelForm) {
+    slotLabelForm.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const fd = new FormData(slotLabelForm);
+      const errEl = document.getElementById('slotLabelError');
+      if (errEl) {
+        errEl.classList.add('d-none');
+        errEl.textContent = '';
+      }
+      try {
+        const resp = await fetch(SLOT_LABEL_URL, { method: 'POST', body: fd });
+        const j = await resp.json().catch(()=>({ok:false, error:'Errore di parsing'}));
+        if (!resp.ok || !j.ok) {
+          if (errEl) {
+            errEl.textContent = j.error || 'Errore durante il salvataggio.';
+            errEl.classList.remove('d-none');
+          } else {
+            alert(j.error || 'Errore durante il salvataggio.');
+          }
+          return;
+        }
+        const modalEl = document.getElementById('slotLabelModal');
+        const inst = bootstrap.Modal.getInstance(modalEl);
+        if (inst) inst.hide();
+        location.reload();
+      } catch (e) {
+        alert('Errore di comunicazione.');
+      }
     });
   }
 

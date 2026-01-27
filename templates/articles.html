@@ -323,7 +323,7 @@
         </thead>
         <tbody>
           {% for it in items %}
-          <tr {% if can_manage_items %}data-edit-url="{{ url_for('edit_item', item_id=it.id) }}"{% endif %}>
+          <tr {% if can_manage_items %}data-edit-url="{{ url_for('edit_item', item_id=it.id, next=current_url) }}"{% endif %}>
             {% if can_manage_items %}<td><input type="checkbox" name="item_ids" value="{{ it.id }}"></td>{% endif %}
             <td>{{ it.id }}</td>
             <td>{% if it.category %}<span class="badge-color" style="background:{{ it.category.color }}"></span>{{ it.category.name }}{% endif %}</td>
@@ -352,8 +352,9 @@
             {% if can_manage_items %}
             <td class="text-center">{% if it.share_drawer %}&#10003;{% endif %}</td>
             <td class="text-nowrap">
-              <a href="{{ url_for('edit_item', item_id=it.id) }}" class="btn btn-sm btn-outline-primary">Modifica</a>
+              <a href="{{ url_for('edit_item', item_id=it.id, next=current_url) }}" class="btn btn-sm btn-outline-primary">Modifica</a>
               <form method="post" action="{{ url_for('delete_item', item_id=it.id) }}" class="d-inline" onsubmit="return confirm('Eliminare articolo?')">
+                <input type="hidden" name="next" value="{{ current_url }}">
                 <button class="btn btn-sm btn-outline-danger">Elimina</button>
               </form>
             </td>
