@@ -179,7 +179,7 @@
                 </td>
               {% else %}
                 {% set bg = cell.entries[0].color if cell.entries else '#6c757d' %}
-                <td class="cell-used" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" data-items='{{ cell.entries|tojson }}' data-label="{{ display_label }}" data-slot-id="{{ cell.slot_id }}" style="background:{{ bg }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
+                <td class="cell-used{% if cell.entries and (cell.entries|length) > 1 %} cell-multi{% endif %}" data-col="{{ col }}" data-row="{{ r }}" data-cat="{{ cell.cat_id or '' }}" data-items='{{ cell.entries|tojson }}' data-label="{{ display_label }}" data-slot-id="{{ cell.slot_id }}" style="background:{{ bg }}" {% if merge %}rowspan="{{ merge.rowspan }}" colspan="{{ merge.colspan }}"{% endif %}>
                   <div class="cell-inner">
                     {% if cell_custom %}
                       <div class="cell-line fw-bold">{{ cell_label }}</div>
