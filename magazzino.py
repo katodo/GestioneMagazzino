@@ -12,6 +12,8 @@ import re
 from werkzeug.security import generate_password_hash, check_password_hash
 import json
 import os, io, csv
+import shutil
+import threading
 
 # ===================== DEFAULT ETICHETTE =====================
 DEFAULT_LABEL_W_MM = 50
@@ -46,6 +48,75 @@ def _safe_next_url(next_url: Optional[str]) -> Optional[str]:
         return None
     return next_url
 
+def _load_backup_state() -> dict:
+    if not os.path.exists(BACKUP_STATE_PATH):
+        return {}
+    try:
+        with open(BACKUP_STATE_PATH, "r", encoding="utf-8") as handle:
+            return json.load(handle) or {}
+    except (json.JSONDecodeError, OSError, ValueError):
+        return {}
+
+def _save_backup_state(state: dict) -> None:
+    os.makedirs(app.instance_path, exist_ok=True)
+    with open(BACKUP_STATE_PATH, "w", encoding="utf-8") as handle:
+        json.dump(state, handle, ensure_ascii=False, indent=2)
+
+def _list_backup_files() -> list[str]:
+    if not os.path.exists(BACKUP_DIR):
+        return []
+    files = [
+        os.path.join(BACKUP_DIR, name)
+        for name in os.listdir(BACKUP_DIR)
+        if name.startswith("magazzino_backup_") and name.endswith(".db")
+    ]
+    return sorted(files, key=lambda path: os.path.getmtime(path), reverse=True)
+
+def _rotate_backups() -> None:
+    backups = _list_backup_files()
+    for path in backups[BACKUP_KEEP:]:
+        try:
+            os.remove(path)
+        except OSError:
+            continue
+
+def _create_backup(reason: str) -> Optional[str]:
+    if not os.path.exists(db_path):
+        return None
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_name = f"magazzino_backup_{stamp}.db"
+    backup_path = os.path.join(BACKUP_DIR, backup_name)
+    with _BACKUP_LOCK:
+        if not os.path.exists(db_path):
+            return None
+        shutil.copy2(db_path, backup_path)
+        _rotate_backups()
+        state = _load_backup_state()
+        state["last_backup_time"] = os.path.getmtime(backup_path)
+        state["last_backup_date"] = datetime.now().date().isoformat()
+        state["last_backup_reason"] = reason
+        _save_backup_state(state)
+    return backup_path
+
+def run_startup_backup() -> Optional[str]:
+    return _create_backup("startup")
+
+def maybe_daily_backup() -> Optional[str]:
+    if not os.path.exists(db_path):
+        return None
+    state = _load_backup_state()
+    today = datetime.now().date().isoformat()
+    if state.get("last_check_date") == today:
+        return None
+    state["last_check_date"] = today
+    last_backup_time = float(state.get("last_backup_time") or 0)
+    db_mtime = os.path.getmtime(db_path)
+    _save_backup_state(state)
+    if db_mtime <= last_backup_time:
+        return None
+    return _create_backup("daily")
+
 # ===================== FLASK & DB =====================
 app = Flask(__name__, instance_relative_config=True)
 app.config['SECRET_KEY'] = "supersecret"
@@ -54,9 +125,17 @@ db_path = os.path.join(app.instance_path, "magazzino.db")
 app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{db_path}"
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
+BACKUP_DIR = os.path.join(app.instance_path, "backups")
+BACKUP_STATE_PATH = os.path.join(app.instance_path, "backup_state.json")
+BACKUP_KEEP = int(os.getenv("MAGAZZINO_BACKUP_KEEP", "7"))
+_BACKUP_LOCK = threading.Lock()
 
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
+
+@app.before_request
+def _daily_backup_check():
+    maybe_daily_backup()
 
 # ===================== MODELS =====================
 class User(UserMixin, db.Model):
@@ -1037,7 +1116,7 @@ def required_permissions_for_path(path: str) -> Optional[set]:
         if any(keyword in path for keyword in ["set_position", "clear_position", "move_slot", "suggest_position"]):
             return {"manage_placements"}
         return {"manage_items"}
-    if path.startswith("/admin/labels") or path.startswith("/admin/cards") or path.startswith("/admin/items/export"):
+    if path.startswith("/admin/labels") or path.startswith("/admin/cards") or path.startswith("/admin/items/export") or path.startswith("/admin/data"):
         return {"manage_items"}
     if path == "/admin":
         return {"manage_items"}
@@ -1880,6 +1959,8 @@ def export_items_csv():
         "material",
         "finish",
         "description",
+        "quantity",
+        "share_drawer",
         "position",
     ])
     for item in items:
@@ -1897,11 +1978,225 @@ def export_items_csv():
             item.material.name if item.material else "",
             item.finish.name if item.finish else "",
             item.description or "",
+            item.quantity,
+            "1" if item.share_drawer else "0",
             pos_by_item.get(item.id, ""),
         ])
     output.seek(0)
     buffer = io.BytesIO(output.getvalue().encode("utf-8"))
     return send_file(buffer, as_attachment=True, download_name="articoli.csv", mimetype="text/csv")
+
+def _serialize_records(query, fields: list[str]) -> list[dict]:
+    records = []
+    for obj in query:
+        record = {field: getattr(obj, field) for field in fields}
+        records.append(record)
+    return records
+
+@app.route("/admin/data/export.json")
+@login_required
+def export_data_json():
+    payload = {
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "categories": _serialize_records(Category.query.order_by(Category.id), ["id", "name", "color", "main_measure_mode"]),
+        "materials": _serialize_records(Material.query.order_by(Material.id), ["id", "name"]),
+        "finishes": _serialize_records(Finish.query.order_by(Finish.id), ["id", "name"]),
+        "thread_standards": _serialize_records(ThreadStandard.query.order_by(ThreadStandard.id), ["id", "code", "label", "sort_order"]),
+        "thread_sizes": _serialize_records(ThreadSize.query.order_by(ThreadSize.id), ["id", "standard_id", "value", "sort_order"]),
+        "custom_fields": _serialize_records(CustomField.query.order_by(CustomField.id), ["id", "name", "field_type", "options", "unit", "sort_order", "is_active"]),
+        "category_field_settings": _serialize_records(CategoryFieldSetting.query.order_by(CategoryFieldSetting.id), ["id", "category_id", "field_key", "is_enabled"]),
+        "item_custom_field_values": _serialize_records(ItemCustomFieldValue.query.order_by(ItemCustomFieldValue.id), ["id", "item_id", "field_id", "value_text"]),
+        "subtypes": _serialize_records(Subtype.query.order_by(Subtype.id), ["id", "category_id", "name"]),
+        "locations": _serialize_records(Location.query.order_by(Location.id), ["id", "name"]),
+        "cabinets": _serialize_records(Cabinet.query.order_by(Cabinet.id), ["id", "location_id", "name", "rows_max", "cols_max", "compartments_per_slot"]),
+        "slots": _serialize_records(Slot.query.order_by(Slot.id), ["id", "cabinet_id", "row_num", "col_code", "is_blocked", "display_label_override", "print_label_override"]),
+        "drawer_merges": _serialize_records(DrawerMerge.query.order_by(DrawerMerge.id), ["id", "cabinet_id", "row_start", "row_end", "col_start", "col_end"]),
+        "items": _serialize_records(Item.query.order_by(Item.id), [
+            "id", "category_id", "subtype_id", "name", "description", "share_drawer",
+            "thread_standard", "thread_size", "inner_d_mm", "thickness_mm", "length_mm", "outer_d_mm",
+            "material_id", "finish_id", "quantity", "label_show_category", "label_show_subtype",
+            "label_show_thread", "label_show_measure", "label_show_main", "label_show_material"
+        ]),
+        "assignments": _serialize_records(Assignment.query.order_by(Assignment.id), ["id", "slot_id", "compartment_no", "item_id"]),
+    }
+    buffer = io.BytesIO(json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
+    return send_file(buffer, as_attachment=True, download_name="magazzino_data.json", mimetype="application/json")
+
+@app.route("/admin/data/export.csv")
+@login_required
+def export_data_csv():
+    return export_items_csv()
+
+def _parse_bool(value: str | None) -> bool:
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "si", "s"}
+
+def _parse_float(value: str | None) -> float | None:
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    if cleaned == "":
+        return None
+    return float(cleaned)
+
+def _find_or_create_by_name(model, name: str, **extra_fields):
+    cleaned = (name or "").strip()
+    if not cleaned:
+        return None
+    instance = model.query.filter_by(name=cleaned).first()
+    if instance:
+        return instance
+    instance = model(name=cleaned, **extra_fields)
+    db.session.add(instance)
+    db.session.flush()
+    return instance
+
+def _parse_position(value: str) -> tuple[str | None, str | None, int | None]:
+    cleaned = (value or "").strip()
+    if not cleaned:
+        return None, None, None
+    if "-" not in cleaned:
+        return None, None, None
+    cab_name, slot_label = cleaned.rsplit("-", 1)
+    cab_name = cab_name.strip()
+    slot_label = slot_label.strip().upper()
+    match = re.match(r"^([A-Z]{1,2})(\\d+)$", slot_label)
+    if not match:
+        return None, None, None
+    return cab_name, match.group(1), int(match.group(2))
+
+def _import_items_from_csv(file_storage) -> tuple[int, list[str]]:
+    content = file_storage.read()
+    text = content.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(text))
+    imported = 0
+    warnings = []
+    for row in reader:
+        category = _find_or_create_by_name(Category, row.get("category") or "")
+        if not category:
+            warnings.append("Categoria mancante per una riga CSV.")
+            continue
+        subtype = None
+        subtype_name = (row.get("subtype") or "").strip()
+        if subtype_name:
+            subtype = Subtype.query.filter_by(category_id=category.id, name=subtype_name).first()
+            if not subtype:
+                subtype = Subtype(category_id=category.id, name=subtype_name)
+                db.session.add(subtype)
+                db.session.flush()
+        material = _find_or_create_by_name(Material, row.get("material") or "")
+        finish = _find_or_create_by_name(Finish, row.get("finish") or "")
+
+        item_id = None
+        if row.get("id"):
+            try:
+                item_id = int(row["id"])
+            except ValueError:
+                item_id = None
+        item = Item.query.get(item_id) if item_id else None
+        if not item:
+            item = Item(id=item_id) if item_id else Item()
+            db.session.add(item)
+
+        item.category_id = category.id
+        item.subtype_id = subtype.id if subtype else None
+        item.thread_standard = (row.get("thread_standard") or "").strip() or None
+        item.thread_size = (row.get("thread_size") or "").strip() or None
+        item.length_mm = _parse_float(row.get("length_mm"))
+        item.outer_d_mm = _parse_float(row.get("outer_d_mm"))
+        item.inner_d_mm = _parse_float(row.get("inner_d_mm"))
+        item.thickness_mm = _parse_float(row.get("thickness_mm"))
+        item.material_id = material.id if material else None
+        item.finish_id = finish.id if finish else None
+        item.description = (row.get("description") or "").strip() or None
+        quantity_val = row.get("quantity")
+        item.quantity = int(quantity_val) if quantity_val not in (None, "") else 0
+        item.share_drawer = _parse_bool(row.get("share_drawer"))
+        item.name = auto_name_for(item)
+        db.session.flush()
+
+        cab_name, col_code, row_num = _parse_position(row.get("position") or "")
+        if cab_name and col_code and row_num:
+            cabinet = Cabinet.query.filter_by(name=cab_name).first()
+            if cabinet:
+                try:
+                    _assign_position(item, cabinet.id, col_code, row_num, force_share=True)
+                except Exception as exc:
+                    warnings.append(f"Posizione non assegnata per articolo {item.id}: {exc}")
+            else:
+                warnings.append(f"Cassettiera '{cab_name}' non trovata per articolo {item.id}.")
+
+        imported += 1
+    db.session.commit()
+    return imported, warnings
+
+def _merge_records(model, records: list[dict], fields: list[str]) -> int:
+    imported = 0
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        payload = {field: record.get(field) for field in fields if field in record}
+        if not payload:
+            continue
+        obj = model(**payload)
+        db.session.merge(obj)
+        imported += 1
+    return imported
+
+@app.route("/admin/data/import", methods=["POST"])
+@login_required
+def import_data():
+    format_name = (request.form.get("format") or "").lower().strip()
+    file_storage = request.files.get("file")
+    if not file_storage:
+        flash("Seleziona un file da importare.", "danger")
+        return redirect(url_for("admin_items"))
+
+    if format_name == "csv":
+        imported, warnings = _import_items_from_csv(file_storage)
+        if warnings:
+            for warning in warnings[:5]:
+                flash(warning, "warning")
+            if len(warnings) > 5:
+                flash(f"Altri {len(warnings) - 5} avvisi durante l'import.", "warning")
+        flash(f"Import CSV completato: {imported} articoli.", "success")
+        return redirect(url_for("admin_items"))
+
+    if format_name == "json":
+        try:
+            payload = json.loads(file_storage.read().decode("utf-8"))
+        except (json.JSONDecodeError, ValueError):
+            flash("File JSON non valido.", "danger")
+            return redirect(url_for("admin_items"))
+
+        total = 0
+        total += _merge_records(Category, payload.get("categories", []), ["id", "name", "color", "main_measure_mode"])
+        total += _merge_records(Material, payload.get("materials", []), ["id", "name"])
+        total += _merge_records(Finish, payload.get("finishes", []), ["id", "name"])
+        total += _merge_records(ThreadStandard, payload.get("thread_standards", []), ["id", "code", "label", "sort_order"])
+        total += _merge_records(ThreadSize, payload.get("thread_sizes", []), ["id", "standard_id", "value", "sort_order"])
+        total += _merge_records(CustomField, payload.get("custom_fields", []), ["id", "name", "field_type", "options", "unit", "sort_order", "is_active"])
+        total += _merge_records(CategoryFieldSetting, payload.get("category_field_settings", []), ["id", "category_id", "field_key", "is_enabled"])
+        total += _merge_records(Subtype, payload.get("subtypes", []), ["id", "category_id", "name"])
+        total += _merge_records(Location, payload.get("locations", []), ["id", "name"])
+        total += _merge_records(Cabinet, payload.get("cabinets", []), ["id", "location_id", "name", "rows_max", "cols_max", "compartments_per_slot"])
+        total += _merge_records(Slot, payload.get("slots", []), ["id", "cabinet_id", "row_num", "col_code", "is_blocked", "display_label_override", "print_label_override"])
+        total += _merge_records(DrawerMerge, payload.get("drawer_merges", []), ["id", "cabinet_id", "row_start", "row_end", "col_start", "col_end"])
+        total += _merge_records(Item, payload.get("items", []), [
+            "id", "category_id", "subtype_id", "name", "description", "share_drawer",
+            "thread_standard", "thread_size", "inner_d_mm", "thickness_mm", "length_mm", "outer_d_mm",
+            "material_id", "finish_id", "quantity", "label_show_category", "label_show_subtype",
+            "label_show_thread", "label_show_measure", "label_show_main", "label_show_material"
+        ])
+        total += _merge_records(ItemCustomFieldValue, payload.get("item_custom_field_values", []), ["id", "item_id", "field_id", "value_text"])
+        total += _merge_records(Assignment, payload.get("assignments", []), ["id", "slot_id", "compartment_no", "item_id"])
+        db.session.commit()
+        flash(f"Import JSON completato: {total} record.", "success")
+        return redirect(url_for("admin_items"))
+
+    flash("Formato import non supportato.", "danger")
+    return redirect(url_for("admin_items"))
 
 
 @app.route("/admin/to_place")
@@ -4593,4 +4888,5 @@ def init_db():
 # ===================== MAIN =====================
 if __name__ == "__main__":
     init_db()
+    run_startup_backup()
     app.run(debug=True, host="0.0.0.0")

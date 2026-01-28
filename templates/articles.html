@@ -9,9 +9,30 @@
     <div class="d-flex flex-wrap gap-2">
       <a href="#newItemForm" class="btn btn-primary btn-sm">Nuovo articolo</a>
       <a href="{{ url_for('export_items_csv') }}" class="btn btn-outline-dark btn-sm">Esporta CSV</a>
+      <a href="{{ url_for('export_data_json') }}" class="btn btn-outline-secondary btn-sm">Esporta JSON</a>
     </div>
   {% endif %}
 </div>
+
+{% if can_manage_items %}
+<div class="form-section mb-3">
+  <h5 class="mb-2">Importa dati</h5>
+  <form method="post" action="{{ url_for('import_data') }}" enctype="multipart/form-data" class="row g-2 align-items-center">
+    <div class="col-md-5">
+      <input type="file" name="file" class="form-control" required>
+    </div>
+    <div class="col-md-3">
+      <select name="format" class="form-select" required>
+        <option value="csv">CSV articoli</option>
+        <option value="json">JSON completo</option>
+      </select>
+    </div>
+    <div class="col-md-2">
+      <button type="submit" class="btn btn-outline-primary w-100">Importa</button>
+    </div>
+  </form>
+</div>
+{% endif %}
 
 <div class="row g-3 mb-3">
   <div class="col-lg-3 col-md-6">
