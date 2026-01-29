@@ -1081,6 +1081,12 @@ def ensure_auth_defaults():
 
     db.session.flush()
 
+    if User.query.count() == 0:
+        admin_user = User(username="admin", role=admin_role)
+        admin_user.set_password("admin")
+        db.session.add(admin_user)
+        db.session.flush()
+
     users_without_role = User.query.filter(User.role_id.is_(None)).order_by(User.id).all()
     if users_without_role:
         first_user_id = users_without_role[0].id
