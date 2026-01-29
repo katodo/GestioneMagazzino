@@ -1,10 +1,10 @@
 # magazzino.py
-from flask import Flask, render_template, redirect, url_for, request, jsonify, flash, send_file
+from flask import Flask, render_template, redirect, url_for, request, jsonify, flash, send_file, session
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from sqlalchemy import func, select, or_, text, case
 from sqlalchemy.orm import selectinload
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from itertools import islice
 from functools import wraps
@@ -120,6 +120,7 @@ def maybe_daily_backup() -> Optional[str]:
 # ===================== FLASK & DB =====================
 app = Flask(__name__, instance_relative_config=True)
 app.config['SECRET_KEY'] = "supersecret"
+app.config["REMEMBER_COOKIE_DURATION"] = timedelta(days=30)
 os.makedirs(app.instance_path, exist_ok=True)
 db_path = os.path.join(app.instance_path, "magazzino.db")
 app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{db_path}"
@@ -1456,7 +1457,7 @@ def login():
             if not (user.password.startswith("pbkdf2:") or user.password.startswith("scrypt:")):
                 user.set_password(password)
                 db.session.commit()
-            login_user(user)
+            login_user(user, remember=True)
             if user.has_permission("manage_items"):
                 return redirect(url_for("admin_items"))
             return redirect(url_for("index"))
@@ -1487,7 +1488,7 @@ def register():
     user.set_password(password)
     db.session.add(user)
     db.session.commit()
-    login_user(user)
+    login_user(user, remember=True)
     flash("Registrazione completata.", "success")
     if user.has_permission("manage_items"):
         return redirect(url_for("admin_items"))
@@ -1496,7 +1497,11 @@ def register():
 @app.route("/logout")
 @login_required
 def logout():
-    logout_user(); return redirect(url_for("index"))
+    logout_user()
+    session.clear()
+    response = redirect(url_for("index"))
+    response.delete_cookie(app.config.get("REMEMBER_COOKIE_NAME", "remember_token"))
+    return response
 
 # ===================== PUBLIC =====================
 def _render_articles_page():
@@ -4675,26 +4680,20 @@ def cards_pdf():
         c.rect(x, y + card_h - 3, card_w, 3, fill=1, stroke=0)
         c.setFillColorRGB(0, 0, 0)
 
-        title_lines = wrap_to_lines(auto_name_for(item), "Helvetica-Bold", 12, card_w - 2 * padding, max_lines=2)
-        c.setFont("Helvetica-Bold", 12)
+        title_font_size = 12
+        title_leading = 11
+        title_lines = wrap_to_lines(
+            auto_name_for(item),
+            "Helvetica-Bold",
+            title_font_size,
+            card_w - 2 * padding,
+            max_lines=2,
+        )
+        c.setFont("Helvetica-Bold", title_font_size)
         for ln in title_lines:
-            cy -= 12
+            cy -= title_leading
             c.drawString(x + padding, cy, ln)
             cy -= 2
-
-        meta_parts = []
-        if item.category:
-            meta_parts.append(item.category.name)
-        if item.subtype:
-            meta_parts.append(item.subtype.name)
-        if item.thread_size:
-            meta_parts.append(item.thread_size)
-        meta_text = " · ".join(meta_parts)
-        if meta_text:
-            c.setFont("Helvetica", 10)
-            cy -= 10
-            c.drawString(x + padding, cy, meta_text)
-            cy -= 6
 
         details = []
         dim = _fmt_mm(item.outer_d_mm if not (is_screw(item) or is_standoff(item) or is_spacer(item)) else item.length_mm)
@@ -4725,11 +4724,6 @@ def cards_pdf():
                     cy -= 11
                     c.drawString(x + padding, cy, ln)
                 cy -= 2
-
-        qty_line = f"Quantità: {item.quantity}"
-        c.setFont("Helvetica-Bold", 9.5)
-        cy -= 12
-        c.drawString(x + padding, cy, qty_line)
 
         pos_data = pos_by_item.get(item.id)
         if pos_data:
