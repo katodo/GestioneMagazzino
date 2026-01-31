@@ -1,7 +1,15 @@
 # magazzino.py
 from flask import Flask, render_template, redirect, url_for, request, jsonify, flash, send_file, session
 from flask_sqlalchemy import SQLAlchemy
-from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from flask_login import (
+    LoginManager,
+    UserMixin,
+    AnonymousUserMixin,
+    login_user,
+    login_required,
+    logout_user,
+    current_user,
+)
 from sqlalchemy import func, select, or_, text, case
 from sqlalchemy.orm import selectinload
 from datetime import datetime, timezone, timedelta
@@ -170,7 +178,7 @@ class User(UserMixin, db.Model):
             is not None
         )
 
-class AnonymousUser(UserMixin):
+class AnonymousUser(AnonymousUserMixin):
     def has_permission(self, permission_key: str) -> bool:
         return False
 
