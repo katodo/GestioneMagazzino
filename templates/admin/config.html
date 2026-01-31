@@ -278,6 +278,14 @@
       <form method="post" action="{{ url_for('update_settings') }}" class="row g-2">
         <div class="col-6"><label class="form-label">Larghezza (mm)</label><input type="number" step="0.1" class="form-control" name="label_w_mm" value="{{ settings.label_w_mm }}"></div>
         <div class="col-6"><label class="form-label">Altezza (mm)</label><input type="number" step="0.1" class="form-control" name="label_h_mm" value="{{ settings.label_h_mm }}"></div>
+        <div class="col-6">
+          <label class="form-label">Formato foglio etichette</label>
+          <select class="form-select" name="label_page_format">
+            {% for value, label in page_format_options %}
+              <option value="{{ value }}" {{ 'selected' if settings.label_page_format == value else '' }}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
         <div class="col-6"><label class="form-label">Margini top/bottom (mm)</label><input type="number" step="0.1" class="form-control" name="margin_tb_mm" value="{{ settings.margin_tb_mm }}"></div>
         <div class="col-6"><label class="form-label">Margini sx/dx (mm)</label><input type="number" step="0.1" class="form-control" name="margin_lr_mm" value="{{ settings.margin_lr_mm }}"></div>
         <div class="col-6"><label class="form-label">Spazio tra etichette (mm)</label><input type="number" step="0.1" class="form-control" name="gap_mm" value="{{ settings.gap_mm }}"></div>
@@ -288,6 +296,14 @@
         <div class="col-6"><label class="form-label">Dimensione testo posizione (pt)</label><input type="number" step="0.1" class="form-control" name="label_position_font_pt" value="{{ settings.label_position_font_pt }}"></div>
         <div class="col-6"><label class="form-label">Cartellini: larghezza (mm)</label><input type="number" step="0.1" class="form-control" name="card_w_mm" value="{{ settings.card_w_mm }}"></div>
         <div class="col-6"><label class="form-label">Cartellini: altezza (mm)</label><input type="number" step="0.1" class="form-control" name="card_h_mm" value="{{ settings.card_h_mm }}"></div>
+        <div class="col-6">
+          <label class="form-label">Formato foglio cartellini</label>
+          <select class="form-select" name="card_page_format">
+            {% for value, label in page_format_options %}
+              <option value="{{ value }}" {{ 'selected' if settings.card_page_format == value else '' }}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
         <div class="col-6">
           <label class="form-label">Orientamento</label>
           <select class="form-select" name="orientation_landscape">
