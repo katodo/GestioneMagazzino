@@ -1,5 +1,5 @@
 # magazzino.py
-from flask import Flask, render_template, redirect, url_for, request, jsonify, flash, send_file, session
+from flask import Flask, render_template, redirect, url_for, request, jsonify, flash, send_file, session, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import (
     LoginManager,
@@ -22,6 +22,8 @@ import json
 import os, io, csv
 import shutil
 import threading
+import uuid
+from werkzeug.utils import secure_filename
 
 # ===================== DEFAULT ETICHETTE =====================
 DEFAULT_LABEL_W_MM = 50
@@ -138,6 +140,23 @@ BACKUP_DIR = os.path.join(app.instance_path, "backups")
 BACKUP_STATE_PATH = os.path.join(app.instance_path, "backup_state.json")
 BACKUP_KEEP = int(os.getenv("MAGAZZINO_BACKUP_KEEP", "7"))
 _BACKUP_LOCK = threading.Lock()
+AVATAR_UPLOAD_DIR = os.path.join(app.instance_path, "uploads", "avatars")
+AVATAR_ALLOWED_EXTS = {"png", "jpg", "jpeg", "webp"}
+AVATAR_DICEBEAR_STYLE = "avataaars"
+AVATAR_LIBRARY_SEEDS = [
+    "Azzurro",
+    "Bruno",
+    "Cielo",
+    "Dalia",
+    "Elio",
+    "Fiamma",
+    "Gelsomino",
+    "Iride",
+    "Luna",
+    "Miele",
+    "Nerino",
+    "Onda",
+]
 
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
@@ -151,6 +170,12 @@ class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
     password = db.Column(db.String(128), nullable=False)
+    first_name = db.Column(db.String(80), nullable=True)
+    last_name = db.Column(db.String(80), nullable=True)
+    email = db.Column(db.String(120), nullable=True)
+    avatar_type = db.Column(db.String(20), nullable=True)
+    avatar_value = db.Column(db.String(200), nullable=True)
+    social_links = db.Column(db.Text, nullable=True)
     role_id = db.Column(db.Integer, db.ForeignKey("role.id"), nullable=True)
     role = db.relationship("Role", back_populates="users", lazy="joined")
 
@@ -939,6 +964,12 @@ def ensure_user_columns():
     existing_cols = {r[1] for r in rows}
     new_cols = [
         ("role_id", "INTEGER", None),
+        ("first_name", "VARCHAR(80)", None),
+        ("last_name", "VARCHAR(80)", None),
+        ("email", "VARCHAR(120)", None),
+        ("avatar_type", "VARCHAR(20)", None),
+        ("avatar_value", "VARCHAR(200)", None),
+        ("social_links", "TEXT", None),
     ]
     added = False
     for col_name, col_type, default_val in new_cols:
@@ -995,6 +1026,47 @@ def enforce_login_and_permissions():
             flash("Non hai i permessi per accedere a questa sezione.", "danger")
             return redirect(url_for("index"))
     return None
+
+SOCIAL_FIELDS = [
+    ("linkedin", "LinkedIn"),
+    ("telegram", "Telegram"),
+    ("whatsapp", "WhatsApp"),
+    ("github", "GitHub"),
+    ("x", "X / Twitter"),
+]
+
+def _dicebear_url(seed: str) -> str:
+    return f"https://api.dicebear.com/7.x/{AVATAR_DICEBEAR_STYLE}/svg?seed={seed}"
+
+def avatar_url_for(user: User | None) -> str | None:
+    if not user:
+        return None
+    if user.avatar_type == "upload" and user.avatar_value:
+        return url_for("uploaded_avatar", filename=user.avatar_value)
+    if user.avatar_type == "library" and user.avatar_value:
+        return _dicebear_url(user.avatar_value)
+    if user.username:
+        return _dicebear_url(user.username)
+    return _dicebear_url(f"user-{user.id}")
+
+def parse_social_links(raw_value: str | None) -> dict:
+    if not raw_value:
+        return {}
+    try:
+        data = json.loads(raw_value)
+    except json.JSONDecodeError:
+        return {}
+    if isinstance(data, dict):
+        return {str(k): str(v) for k, v in data.items() if v}
+    return {}
+
+def build_social_links(form) -> dict:
+    data = {}
+    for key, _label in SOCIAL_FIELDS:
+        value = (form.get(f"social_{key}") or "").strip()
+        if value:
+            data[key] = value
+    return data
 
 def get_settings()->Settings:
     ensure_core_schema()
@@ -1516,6 +1588,83 @@ def logout():
     response = redirect(url_for("index"))
     response.delete_cookie(app.config.get("REMEMBER_COOKIE_NAME", "remember_token"))
     return response
+
+@app.route("/uploads/avatars/<path:filename>")
+@login_required
+def uploaded_avatar(filename):
+    return send_from_directory(AVATAR_UPLOAD_DIR, filename)
+
+@app.route("/profilo", methods=["GET", "POST"])
+@login_required
+def profile():
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "profile":
+            current_user.first_name = (request.form.get("first_name") or "").strip()
+            current_user.last_name = (request.form.get("last_name") or "").strip()
+            current_user.email = (request.form.get("email") or "").strip()
+            social_links = build_social_links(request.form)
+            current_user.social_links = json.dumps(social_links, ensure_ascii=False)
+            db.session.commit()
+            flash("Profilo aggiornato.", "success")
+        elif action == "password":
+            old_password = request.form.get("old_password") or ""
+            new_password = request.form.get("new_password") or ""
+            confirm_password = request.form.get("confirm_password") or ""
+            if not current_user.check_password(old_password):
+                flash("La password attuale non è corretta.", "danger")
+            elif len(new_password) < 6:
+                flash("La nuova password è troppo corta (minimo 6 caratteri).", "danger")
+            elif new_password != confirm_password:
+                flash("Le nuove password non coincidono.", "danger")
+            else:
+                current_user.set_password(new_password)
+                db.session.commit()
+                flash("Password aggiornata.", "success")
+        elif action == "avatar_library":
+            seed = (request.form.get("avatar_seed") or "").strip()
+            if not seed:
+                flash("Seleziona un avatar dalla libreria.", "danger")
+            else:
+                current_user.avatar_type = "library"
+                current_user.avatar_value = seed
+                db.session.commit()
+                flash("Avatar aggiornato.", "success")
+        elif action == "avatar_upload":
+            file = request.files.get("avatar_file")
+            if not file or not file.filename:
+                flash("Seleziona un file immagine.", "danger")
+            else:
+                ext = file.filename.rsplit(".", 1)[-1].lower()
+                if ext not in AVATAR_ALLOWED_EXTS:
+                    flash("Formato non supportato. Usa PNG, JPG o WEBP.", "danger")
+                else:
+                    os.makedirs(AVATAR_UPLOAD_DIR, exist_ok=True)
+                    filename = secure_filename(file.filename)
+                    unique_name = f"{uuid.uuid4().hex}_{filename}"
+                    path = os.path.join(AVATAR_UPLOAD_DIR, unique_name)
+                    file.save(path)
+                    if current_user.avatar_type == "upload" and current_user.avatar_value:
+                        old_path = os.path.join(AVATAR_UPLOAD_DIR, current_user.avatar_value)
+                        if os.path.exists(old_path):
+                            os.remove(old_path)
+                    current_user.avatar_type = "upload"
+                    current_user.avatar_value = unique_name
+                    db.session.commit()
+                    flash("Avatar personalizzato caricato.", "success")
+        return redirect(url_for("profile"))
+    social_values = parse_social_links(current_user.social_links)
+    return render_template(
+        "profile.html",
+        social_values=social_values,
+        social_fields=SOCIAL_FIELDS,
+        avatar_library_seeds=AVATAR_LIBRARY_SEEDS,
+        dicebear_style=AVATAR_DICEBEAR_STYLE,
+    )
+
+@app.context_processor
+def inject_user_avatar():
+    return {"current_user_avatar": avatar_url_for(current_user) if current_user.is_authenticated else None}
 
 # ===================== PUBLIC =====================
 def _render_articles_page():
