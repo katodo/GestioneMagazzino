@@ -84,6 +84,20 @@
       width: 66vw;
       max-width: 1100px;
     }
+    .avatar-img {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 2px solid rgba(255,255,255,0.6);
+    }
+    .avatar-img-lg {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 2px solid rgba(0,0,0,0.08);
+    }
     @media (max-width: 992px) {
       .slot-modal .modal-dialog {
         width: auto;
@@ -96,7 +110,7 @@
   <nav class="navbar navbar-dark bg-dark">
     <div class="container-fluid">
       <a class="navbar-brand" href="/">Magazzino</a>
-      <div class="d-flex flex-wrap gap-2">
+      <div class="d-flex flex-wrap gap-2 align-items-center">
         <a href="{{ url_for('articles') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint in ['articles','index','admin_items'] else '' }}">Articoli</a>
         <a href="{{ url_for('cassettiere') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint == 'cassettiere' else '' }}">Casssettiere</a>
         {% if current_user.is_authenticated %}
@@ -106,7 +120,21 @@
           {% if current_user.has_permission('manage_config') or current_user.has_permission('manage_users') or current_user.has_permission('manage_roles') %}
             <a href="{{ url_for('admin_config') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint == 'admin_config' else '' }}">Configurazione</a>
           {% endif %}
-          <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Logout</a>
+          <div class="dropdown">
+            <button class="btn btn-outline-light btn-sm dropdown-toggle d-flex align-items-center gap-2" data-bs-toggle="dropdown" aria-expanded="false">
+              {% if current_user_avatar %}
+                <img src="{{ current_user_avatar }}" alt="Avatar" class="avatar-img">
+              {% else %}
+                <span class="avatar-img bg-secondary d-inline-flex align-items-center justify-content-center">?</span>
+              {% endif %}
+              <span>{{ current_user.username }}</span>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="{{ url_for('profile') }}">Profilo</a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><a class="dropdown-item" href="{{ url_for('logout') }}">Logout</a></li>
+            </ul>
+          </div>
         {% else %}
           <a href="{{ url_for('login') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint == 'login' else '' }}">Login</a>
         {% endif %}
