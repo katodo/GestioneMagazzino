@@ -39,6 +39,8 @@ DEFAULT_LABEL_POSITION_FONT_PT = 7.0
 DEFAULT_CARD_W_MM = 61
 DEFAULT_CARD_H_MM = 30
 DEFAULT_ORIENTATION_LANDSCAPE = True
+DEFAULT_LABEL_PAGE_FORMAT = "A4"
+DEFAULT_CARD_PAGE_FORMAT = "A4"
 DEFAULT_QR_DEFAULT = True
 DEFAULT_QR_BASE_URL = None  # es. "https://magazzino.local"
 DEFAULT_MQTT_HOST = "localhost"
@@ -47,7 +49,37 @@ DEFAULT_MQTT_TOPIC = "magazzino/slot"
 DEFAULT_MQTT_QOS = 0
 DEFAULT_MQTT_RETAIN = False
 
+PAGE_FORMAT_OPTIONS = [
+    ("A4", "A4"),
+    ("A5", "A5"),
+    ("A3", "A3"),
+    ("LETTER", "Lettera"),
+    ("LEGAL", "Legal"),
+]
+PAGE_FORMAT_KEYS = {key for key, _label in PAGE_FORMAT_OPTIONS}
+PAGE_FORMAT_LABELS = {key: label for key, label in PAGE_FORMAT_OPTIONS}
+
 def mm_to_pt(mm): return mm * 2.8346456693
+
+def normalize_page_format(value: Optional[str], default: str) -> str:
+    key = (value or "").strip().upper()
+    if key in PAGE_FORMAT_KEYS:
+        return key
+    return default
+
+def page_format_label(key: str) -> str:
+    return PAGE_FORMAT_LABELS.get(key, key)
+
+def page_size_for_format(format_key: str):
+    from reportlab.lib.pagesizes import A3, A4, A5, LETTER, LEGAL
+    formats = {
+        "A3": A3,
+        "A4": A4,
+        "A5": A5,
+        "LETTER": LETTER,
+        "LEGAL": LEGAL,
+    }
+    return formats.get(format_key, A4)
 
 def _safe_next_url(next_url: Optional[str]) -> Optional[str]:
     if not next_url:
@@ -243,8 +275,10 @@ class Settings(db.Model):
     label_qr_margin_mm = db.Column(db.Float, nullable=False, default=DEFAULT_LABEL_QR_MARGIN_MM)
     label_position_width_mm = db.Column(db.Float, nullable=False, default=DEFAULT_LABEL_POSITION_WIDTH_MM)
     label_position_font_pt = db.Column(db.Float, nullable=False, default=DEFAULT_LABEL_POSITION_FONT_PT)
+    label_page_format = db.Column(db.String(10), nullable=False, default=DEFAULT_LABEL_PAGE_FORMAT)
     card_w_mm = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_W_MM)
     card_h_mm = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_H_MM)
+    card_page_format = db.Column(db.String(10), nullable=False, default=DEFAULT_CARD_PAGE_FORMAT)
     orientation_landscape = db.Column(db.Boolean, nullable=False, default=DEFAULT_ORIENTATION_LANDSCAPE)
     qr_default = db.Column(db.Boolean, nullable=False, default=DEFAULT_QR_DEFAULT)
     qr_base_url = db.Column(db.String(200), nullable=True)
@@ -862,14 +896,21 @@ def ensure_settings_columns():
         ("label_qr_margin_mm", "REAL", DEFAULT_LABEL_QR_MARGIN_MM),
         ("label_position_width_mm", "REAL", DEFAULT_LABEL_POSITION_WIDTH_MM),
         ("label_position_font_pt", "REAL", DEFAULT_LABEL_POSITION_FONT_PT),
+        ("label_page_format", "VARCHAR(10)", DEFAULT_LABEL_PAGE_FORMAT),
         ("card_w_mm", "REAL", DEFAULT_CARD_W_MM),
         ("card_h_mm", "REAL", DEFAULT_CARD_H_MM),
+        ("card_page_format", "VARCHAR(10)", DEFAULT_CARD_PAGE_FORMAT),
     ]
     added = False
     for col_name, col_type, default_val in new_cols:
         if col_name not in existing_cols:
             try:
-                default_sql = f" DEFAULT {default_val}" if default_val is not None else ""
+                if default_val is None:
+                    default_sql = ""
+                elif isinstance(default_val, str):
+                    default_sql = f" DEFAULT '{default_val}'"
+                else:
+                    default_sql = f" DEFAULT {default_val}"
                 db.session.execute(text(f"ALTER TABLE settings ADD COLUMN {col_name} {col_type}{default_sql}"))
                 added = True
             except Exception:
@@ -1083,8 +1124,10 @@ def get_settings()->Settings:
                      label_qr_margin_mm=DEFAULT_LABEL_QR_MARGIN_MM,
                      label_position_width_mm=DEFAULT_LABEL_POSITION_WIDTH_MM,
                      label_position_font_pt=DEFAULT_LABEL_POSITION_FONT_PT,
+                     label_page_format=DEFAULT_LABEL_PAGE_FORMAT,
                      card_w_mm=DEFAULT_CARD_W_MM,
                      card_h_mm=DEFAULT_CARD_H_MM,
+                     card_page_format=DEFAULT_CARD_PAGE_FORMAT,
                      orientation_landscape=DEFAULT_ORIENTATION_LANDSCAPE,
                      qr_default=DEFAULT_QR_DEFAULT,
                      qr_base_url=DEFAULT_QR_BASE_URL)
@@ -1095,8 +1138,16 @@ def get_settings()->Settings:
     if s.label_qr_margin_mm is None: s.label_qr_margin_mm = DEFAULT_LABEL_QR_MARGIN_MM; changed = True
     if s.label_position_width_mm is None: s.label_position_width_mm = DEFAULT_LABEL_POSITION_WIDTH_MM; changed = True
     if s.label_position_font_pt is None: s.label_position_font_pt = DEFAULT_LABEL_POSITION_FONT_PT; changed = True
+    normalized_label_format = normalize_page_format(getattr(s, "label_page_format", None), DEFAULT_LABEL_PAGE_FORMAT)
+    if getattr(s, "label_page_format", None) != normalized_label_format:
+        s.label_page_format = normalized_label_format
+        changed = True
     if s.card_w_mm is None: s.card_w_mm = DEFAULT_CARD_W_MM; changed = True
     if s.card_h_mm is None: s.card_h_mm = DEFAULT_CARD_H_MM; changed = True
+    normalized_card_format = normalize_page_format(getattr(s, "card_page_format", None), DEFAULT_CARD_PAGE_FORMAT)
+    if getattr(s, "card_page_format", None) != normalized_card_format:
+        s.card_page_format = normalized_card_format
+        changed = True
     if changed:
         db.session.commit()
     return s
@@ -3051,6 +3102,7 @@ def admin_config():
         users=users,
         roles=roles,
         permissions=permissions,
+        page_format_options=PAGE_FORMAT_OPTIONS,
         can_manage_config=can_manage_config,
         can_manage_users=can_manage_users,
         can_manage_roles=can_manage_roles,
@@ -3244,8 +3296,10 @@ def update_settings():
         s.label_qr_margin_mm = float(request.form.get("label_qr_margin_mm"))
         s.label_position_width_mm = float(request.form.get("label_position_width_mm"))
         s.label_position_font_pt = float(request.form.get("label_position_font_pt"))
+        s.label_page_format = normalize_page_format(request.form.get("label_page_format"), DEFAULT_LABEL_PAGE_FORMAT)
         s.card_w_mm = float(request.form.get("card_w_mm"))
         s.card_h_mm = float(request.form.get("card_h_mm"))
+        s.card_page_format = normalize_page_format(request.form.get("card_page_format"), DEFAULT_CARD_PAGE_FORMAT)
         s.orientation_landscape = bool(request.form.get("orientation_landscape"))
         s.qr_default  = bool(request.form.get("qr_default"))
         url = request.form.get("qr_base_url","").strip()
@@ -4342,7 +4396,7 @@ def wrap_to_lines(text: str, font_name: str, font_size: float, max_width_pt: flo
 def labels_pdf():
     try:
         from reportlab.pdfgen import canvas
-        from reportlab.lib.pagesizes import A4, landscape, portrait
+        from reportlab.lib.pagesizes import landscape, portrait
         from reportlab.graphics.shapes import Drawing
         from reportlab.graphics import renderPDF
         from reportlab.lib.colors import HexColor
@@ -4432,7 +4486,8 @@ def labels_pdf():
     include_qr = s.qr_default
 
     buf = io.BytesIO()
-    page_size = (landscape(A4) if s.orientation_landscape else portrait(A4))
+    base_page_size = page_size_for_format(s.label_page_format)
+    page_size = (landscape(base_page_size) if s.orientation_landscape else portrait(base_page_size))
     c = canvas.Canvas(buf, pagesize=page_size)
     page_w, page_h = page_size
 
@@ -4445,7 +4500,8 @@ def labels_pdf():
     cols = int((page_w - 2*margin_x + gap) // (lab_w + gap))
     rows = int((page_h - 2*margin_y + gap) // (lab_h + gap))
     if cols < 1 or rows < 1:
-        flash("Configurazione etichette non valida rispetto al formato A4.", "danger")
+        label_format_name = page_format_label(s.label_page_format)
+        flash(f"Configurazione etichette non valida rispetto al formato {label_format_name}.", "danger")
         return redirect(request.referrer or url_for("admin_items"))
 
     x0 = margin_x
@@ -4765,7 +4821,7 @@ def labels_pdf():
 def cards_pdf():
     try:
         from reportlab.pdfgen import canvas
-        from reportlab.lib.pagesizes import A4, portrait
+        from reportlab.lib.pagesizes import portrait
         from reportlab.lib.colors import HexColor
     except Exception:
         flash("Per la stampa cartellini installa reportlab: pip install reportlab", "danger")
@@ -4799,8 +4855,8 @@ def cards_pdf():
                    .all())
     pos_by_item = {item_id: (cab, slot) for item_id, cab, slot in assignments}
 
-    page_size = portrait(A4)
     s = get_settings()
+    page_size = portrait(page_size_for_format(s.card_page_format))
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=page_size)
     page_w, page_h = page_size
@@ -4812,7 +4868,8 @@ def cards_pdf():
     cols = int((page_w - 2 * margin + gap) // (card_w + gap))
     rows = int((page_h - 2 * margin + gap) // (card_h + gap))
     if cols < 1 or rows < 1:
-        flash("Configurazione cartellini non valida rispetto al formato A4.", "danger")
+        label_format_name = page_format_label(s.card_page_format)
+        flash(f"Configurazione cartellini non valida rispetto al formato {label_format_name}.", "danger")
         return redirect(request.referrer or url_for("admin_items"))
     padding = mm_to_pt(5)
 
@@ -4919,7 +4976,9 @@ def seed_if_empty_or_missing():
             label_qr_size_mm=DEFAULT_LABEL_QR_SIZE_MM, label_qr_margin_mm=DEFAULT_LABEL_QR_MARGIN_MM,
             label_position_width_mm=DEFAULT_LABEL_POSITION_WIDTH_MM,
             label_position_font_pt=DEFAULT_LABEL_POSITION_FONT_PT,
+            label_page_format=DEFAULT_LABEL_PAGE_FORMAT,
             card_w_mm=DEFAULT_CARD_W_MM, card_h_mm=DEFAULT_CARD_H_MM,
+            card_page_format=DEFAULT_CARD_PAGE_FORMAT,
             orientation_landscape=DEFAULT_ORIENTATION_LANDSCAPE,
             qr_default=DEFAULT_QR_DEFAULT, qr_base_url=DEFAULT_QR_BASE_URL
         ))
