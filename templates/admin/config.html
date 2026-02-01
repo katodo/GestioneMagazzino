@@ -95,6 +95,17 @@
   <div class="col-12">
     <div class="form-section" id="sottotipi">
       <h5>Sottotipi (forme)</h5>
+      <div class="row g-2 align-items-center mb-2">
+        <div class="col-md-4">
+          <select class="form-select" id="subtypeFilter">
+            <option value="">Tutte le categorie</option>
+            {% for c in categories %}
+              <option value="{{ c.id }}" {{ 'selected' if c.name == 'Vite' else '' }}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+          <div class="form-text">Filtro rapido per categoria (default: Vite).</div>
+        </div>
+      </div>
       <form method="post" action="{{ url_for('add_subtype') }}" class="row g-2 align-items-center mb-2">
         <div class="col-md-4">
           <select class="form-select" name="category_id" required>
@@ -118,7 +129,7 @@
         </thead>
         <tbody>
           {% for st, c in subtypes %}
-          <tr>
+          <tr data-category-id="{{ st.category_id }}">
             <td>{{ st.id }}</td>
             <td>
               <select class="form-select" name="category_id" form="subtype-{{ st.id }}">
@@ -874,4 +885,33 @@
   </div>
   {% endif %}
 </div>
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const filterSelect = document.getElementById('subtypeFilter');
+    const subtypeTableBody = document.querySelector('#sottotipi table tbody');
+    if (!filterSelect || !subtypeTableBody) {
+      return;
+    }
+    const rows = Array.from(subtypeTableBody.querySelectorAll('tr'));
+    const applyFilter = () => {
+      const selected = filterSelect.value;
+      rows.forEach((row) => {
+        const match = !selected || row.dataset.categoryId === selected;
+        row.classList.toggle('d-none', !match);
+      });
+    };
+    applyFilter();
+    filterSelect.addEventListener('change', applyFilter);
+    subtypeTableBody.addEventListener('change', (event) => {
+      const target = event.target;
+      if (target instanceof HTMLSelectElement && target.name === 'category_id') {
+        const row = target.closest('tr');
+        if (row) {
+          row.dataset.categoryId = target.value;
+          applyFilter();
+        }
+      }
+    });
+  });
+</script>
 {% endblock %}

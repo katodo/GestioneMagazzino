@@ -134,7 +134,16 @@
     }
     body[data-theme="dark"] .avatar-img-lg { border-color: rgba(255,255,255,0.08); }
     body[data-theme="dark"] .text-muted { color: var(--muted-text) !important; }
-    body[data-theme="dark"] .table { color: var(--page-text); }
+    body[data-theme="dark"] .table {
+      color: var(--page-text);
+      --bs-table-bg: var(--panel-bg);
+      --bs-table-color: var(--page-text);
+      --bs-table-striped-bg: #1b1f25;
+      --bs-table-striped-color: var(--page-text);
+      --bs-table-border-color: var(--panel-border);
+      --bs-table-hover-bg: rgba(255,255,255,0.04);
+    }
+    body[data-theme="dark"] .table thead th { background-color: var(--table-head-bg); }
     body[data-theme="dark"] .table-hover tbody tr:hover { background-color: rgba(255,255,255,0.04); }
     body[data-theme="dark"] .modal-content,
     body[data-theme="dark"] .dropdown-menu,
