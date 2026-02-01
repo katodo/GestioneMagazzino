@@ -38,9 +38,18 @@ DEFAULT_LABEL_POSITION_WIDTH_MM = 12
 DEFAULT_LABEL_POSITION_FONT_PT = 7.0
 DEFAULT_CARD_W_MM = 61
 DEFAULT_CARD_H_MM = 30
+DEFAULT_CARD_MARGIN_TB_MM = 12
+DEFAULT_CARD_MARGIN_LR_MM = 12
+DEFAULT_CARD_GAP_MM = 6
+DEFAULT_CARD_PADDING_MM = 5
+DEFAULT_CARD_QR_SIZE_MM = 9
+DEFAULT_CARD_QR_MARGIN_MM = 1
+DEFAULT_CARD_POSITION_WIDTH_MM = 12
+DEFAULT_CARD_POSITION_FONT_PT = 8.5
 DEFAULT_CARD_GAP_H_MM = 6
 DEFAULT_CARD_GAP_V_MM = 6
 DEFAULT_ORIENTATION_LANDSCAPE = True
+DEFAULT_CARD_ORIENTATION_LANDSCAPE = False
 DEFAULT_LABEL_PAGE_FORMAT = "A4"
 DEFAULT_CARD_PAGE_FORMAT = "A4"
 DEFAULT_QR_DEFAULT = True
@@ -280,10 +289,19 @@ class Settings(db.Model):
     label_page_format = db.Column(db.String(10), nullable=False, default=DEFAULT_LABEL_PAGE_FORMAT)
     card_w_mm = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_W_MM)
     card_h_mm = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_H_MM)
+    card_margin_tb_mm = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_MARGIN_TB_MM)
+    card_margin_lr_mm = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_MARGIN_LR_MM)
+    card_gap_mm = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_GAP_MM)
+    card_padding_mm = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_PADDING_MM)
+    card_qr_size_mm = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_QR_SIZE_MM)
+    card_qr_margin_mm = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_QR_MARGIN_MM)
+    card_position_width_mm = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_POSITION_WIDTH_MM)
+    card_position_font_pt = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_POSITION_FONT_PT)
     card_gap_h_mm = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_GAP_H_MM)
     card_gap_v_mm = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_GAP_V_MM)
     card_page_format = db.Column(db.String(10), nullable=False, default=DEFAULT_CARD_PAGE_FORMAT)
     orientation_landscape = db.Column(db.Boolean, nullable=False, default=DEFAULT_ORIENTATION_LANDSCAPE)
+    card_orientation_landscape = db.Column(db.Boolean, nullable=False, default=DEFAULT_CARD_ORIENTATION_LANDSCAPE)
     qr_default = db.Column(db.Boolean, nullable=False, default=DEFAULT_QR_DEFAULT)
     qr_base_url = db.Column(db.String(200), nullable=True)
 
@@ -903,9 +921,18 @@ def ensure_settings_columns():
         ("label_page_format", "VARCHAR(10)", DEFAULT_LABEL_PAGE_FORMAT),
         ("card_w_mm", "REAL", DEFAULT_CARD_W_MM),
         ("card_h_mm", "REAL", DEFAULT_CARD_H_MM),
+        ("card_margin_tb_mm", "REAL", DEFAULT_CARD_MARGIN_TB_MM),
+        ("card_margin_lr_mm", "REAL", DEFAULT_CARD_MARGIN_LR_MM),
+        ("card_gap_mm", "REAL", DEFAULT_CARD_GAP_MM),
+        ("card_padding_mm", "REAL", DEFAULT_CARD_PADDING_MM),
+        ("card_qr_size_mm", "REAL", DEFAULT_CARD_QR_SIZE_MM),
+        ("card_qr_margin_mm", "REAL", DEFAULT_CARD_QR_MARGIN_MM),
+        ("card_position_width_mm", "REAL", DEFAULT_CARD_POSITION_WIDTH_MM),
+        ("card_position_font_pt", "REAL", DEFAULT_CARD_POSITION_FONT_PT),
         ("card_gap_h_mm", "REAL", DEFAULT_CARD_GAP_H_MM),
         ("card_gap_v_mm", "REAL", DEFAULT_CARD_GAP_V_MM),
         ("card_page_format", "VARCHAR(10)", DEFAULT_CARD_PAGE_FORMAT),
+        ("card_orientation_landscape", "BOOLEAN", int(DEFAULT_CARD_ORIENTATION_LANDSCAPE)),
     ]
     added = False
     for col_name, col_type, default_val in new_cols:
@@ -1133,10 +1160,19 @@ def get_settings()->Settings:
                      label_page_format=DEFAULT_LABEL_PAGE_FORMAT,
                      card_w_mm=DEFAULT_CARD_W_MM,
                      card_h_mm=DEFAULT_CARD_H_MM,
+                     card_margin_tb_mm=DEFAULT_CARD_MARGIN_TB_MM,
+                     card_margin_lr_mm=DEFAULT_CARD_MARGIN_LR_MM,
+                     card_gap_mm=DEFAULT_CARD_GAP_MM,
+                     card_padding_mm=DEFAULT_CARD_PADDING_MM,
+                     card_qr_size_mm=DEFAULT_CARD_QR_SIZE_MM,
+                     card_qr_margin_mm=DEFAULT_CARD_QR_MARGIN_MM,
+                     card_position_width_mm=DEFAULT_CARD_POSITION_WIDTH_MM,
+                     card_position_font_pt=DEFAULT_CARD_POSITION_FONT_PT,
                      card_gap_h_mm=DEFAULT_CARD_GAP_H_MM,
                      card_gap_v_mm=DEFAULT_CARD_GAP_V_MM,
                      card_page_format=DEFAULT_CARD_PAGE_FORMAT,
                      orientation_landscape=DEFAULT_ORIENTATION_LANDSCAPE,
+                     card_orientation_landscape=DEFAULT_CARD_ORIENTATION_LANDSCAPE,
                      qr_default=DEFAULT_QR_DEFAULT,
                      qr_base_url=DEFAULT_QR_BASE_URL)
         db.session.add(s); db.session.commit()
@@ -1152,11 +1188,25 @@ def get_settings()->Settings:
         changed = True
     if s.card_w_mm is None: s.card_w_mm = DEFAULT_CARD_W_MM; changed = True
     if s.card_h_mm is None: s.card_h_mm = DEFAULT_CARD_H_MM; changed = True
+    if getattr(s, "card_margin_tb_mm", None) is None: s.card_margin_tb_mm = DEFAULT_CARD_MARGIN_TB_MM; changed = True
+    if getattr(s, "card_margin_lr_mm", None) is None: s.card_margin_lr_mm = DEFAULT_CARD_MARGIN_LR_MM; changed = True
+    if getattr(s, "card_gap_mm", None) is None:
+        legacy_gap = getattr(s, "card_gap_h_mm", None) or getattr(s, "card_gap_v_mm", None)
+        s.card_gap_mm = legacy_gap if legacy_gap is not None else DEFAULT_CARD_GAP_MM
+        changed = True
+    if getattr(s, "card_padding_mm", None) is None: s.card_padding_mm = DEFAULT_CARD_PADDING_MM; changed = True
+    if getattr(s, "card_qr_size_mm", None) is None: s.card_qr_size_mm = DEFAULT_CARD_QR_SIZE_MM; changed = True
+    if getattr(s, "card_qr_margin_mm", None) is None: s.card_qr_margin_mm = DEFAULT_CARD_QR_MARGIN_MM; changed = True
+    if getattr(s, "card_position_width_mm", None) is None: s.card_position_width_mm = DEFAULT_CARD_POSITION_WIDTH_MM; changed = True
+    if getattr(s, "card_position_font_pt", None) is None: s.card_position_font_pt = DEFAULT_CARD_POSITION_FONT_PT; changed = True
     if getattr(s, "card_gap_h_mm", None) is None: s.card_gap_h_mm = DEFAULT_CARD_GAP_H_MM; changed = True
     if getattr(s, "card_gap_v_mm", None) is None: s.card_gap_v_mm = DEFAULT_CARD_GAP_V_MM; changed = True
     normalized_card_format = normalize_page_format(getattr(s, "card_page_format", None), DEFAULT_CARD_PAGE_FORMAT)
     if getattr(s, "card_page_format", None) != normalized_card_format:
         s.card_page_format = normalized_card_format
+        changed = True
+    if getattr(s, "card_orientation_landscape", None) is None:
+        s.card_orientation_landscape = DEFAULT_CARD_ORIENTATION_LANDSCAPE
         changed = True
     if changed:
         db.session.commit()
@@ -3309,10 +3359,19 @@ def update_settings():
         s.label_page_format = normalize_page_format(request.form.get("label_page_format"), DEFAULT_LABEL_PAGE_FORMAT)
         s.card_w_mm = float(request.form.get("card_w_mm"))
         s.card_h_mm = float(request.form.get("card_h_mm"))
-        s.card_gap_h_mm = float(request.form.get("card_gap_h_mm"))
-        s.card_gap_v_mm = float(request.form.get("card_gap_v_mm"))
+        s.card_margin_tb_mm = float(request.form.get("card_margin_tb_mm"))
+        s.card_margin_lr_mm = float(request.form.get("card_margin_lr_mm"))
+        s.card_gap_mm = float(request.form.get("card_gap_mm"))
+        s.card_padding_mm = float(request.form.get("card_padding_mm"))
+        s.card_qr_size_mm = float(request.form.get("card_qr_size_mm"))
+        s.card_qr_margin_mm = float(request.form.get("card_qr_margin_mm"))
+        s.card_position_width_mm = float(request.form.get("card_position_width_mm"))
+        s.card_position_font_pt = float(request.form.get("card_position_font_pt"))
+        s.card_gap_h_mm = s.card_gap_mm
+        s.card_gap_v_mm = s.card_gap_mm
         s.card_page_format = normalize_page_format(request.form.get("card_page_format"), DEFAULT_CARD_PAGE_FORMAT)
         s.orientation_landscape = bool(request.form.get("orientation_landscape"))
+        s.card_orientation_landscape = bool(request.form.get("card_orientation_landscape"))
         s.qr_default  = bool(request.form.get("qr_default"))
         url = request.form.get("qr_base_url","").strip()
         s.qr_base_url = url or None
@@ -4838,8 +4897,12 @@ def labels_pdf():
 def cards_pdf():
     try:
         from reportlab.pdfgen import canvas
-        from reportlab.lib.pagesizes import portrait
+        from reportlab.lib.pagesizes import landscape, portrait
+        from reportlab.graphics.shapes import Drawing
+        from reportlab.graphics import renderPDF
         from reportlab.lib.colors import HexColor
+        from reportlab.graphics.barcode import qr as qrmod
+        from reportlab.pdfbase import pdfmetrics
     except Exception:
         flash("Per la stampa cartellini installa reportlab: pip install reportlab", "danger")
         return redirect(request.referrer or url_for("admin_items"))
@@ -4874,23 +4937,31 @@ def cards_pdf():
     original_order = {item.id: idx for idx, item in enumerate(items)}
 
     s = get_settings()
-    page_size = portrait(page_size_for_format(s.card_page_format))
+    base_page_size = page_size_for_format(s.card_page_format)
+    page_size = (landscape(base_page_size) if s.card_orientation_landscape else portrait(base_page_size))
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=page_size)
     page_w, page_h = page_size
 
-    margin = mm_to_pt(12)
-    gap_h = mm_to_pt(getattr(s, "card_gap_h_mm", DEFAULT_CARD_GAP_H_MM) or DEFAULT_CARD_GAP_H_MM)
-    gap_v = mm_to_pt(getattr(s, "card_gap_v_mm", DEFAULT_CARD_GAP_V_MM) or DEFAULT_CARD_GAP_V_MM)
+    margin_x = mm_to_pt(getattr(s, "card_margin_lr_mm", DEFAULT_CARD_MARGIN_LR_MM) or DEFAULT_CARD_MARGIN_LR_MM)
+    margin_y = mm_to_pt(getattr(s, "card_margin_tb_mm", DEFAULT_CARD_MARGIN_TB_MM) or DEFAULT_CARD_MARGIN_TB_MM)
+    gap = mm_to_pt(getattr(s, "card_gap_mm", DEFAULT_CARD_GAP_MM) or DEFAULT_CARD_GAP_MM)
     card_w = mm_to_pt(getattr(s, "card_w_mm", DEFAULT_CARD_W_MM) or DEFAULT_CARD_W_MM)
     card_h = mm_to_pt(getattr(s, "card_h_mm", DEFAULT_CARD_H_MM) or DEFAULT_CARD_H_MM)
-    cols = int((page_w - 2 * margin + gap_h) // (card_w + gap_h))
-    rows = int((page_h - 2 * margin + gap_v) // (card_h + gap_v))
+    cols = int((page_w - 2 * margin_x + gap) // (card_w + gap))
+    rows = int((page_h - 2 * margin_y + gap) // (card_h + gap))
     if cols < 1 or rows < 1:
         label_format_name = page_format_label(s.card_page_format)
         flash(f"Configurazione cartellini non valida rispetto al formato {label_format_name}.", "danger")
         return redirect(request.referrer or url_for("admin_items"))
-    padding = mm_to_pt(5)
+    padding = mm_to_pt(getattr(s, "card_padding_mm", DEFAULT_CARD_PADDING_MM) or DEFAULT_CARD_PADDING_MM)
+    include_qr = s.qr_default
+    qr_box = mm_to_pt(getattr(s, "card_qr_size_mm", DEFAULT_CARD_QR_SIZE_MM) or DEFAULT_CARD_QR_SIZE_MM) if include_qr else 0
+    qr_margin = mm_to_pt(getattr(s, "card_qr_margin_mm", DEFAULT_CARD_QR_MARGIN_MM) or DEFAULT_CARD_QR_MARGIN_MM) if qr_box else 0
+    qr_area_width = qr_box + (qr_margin * 2 if qr_box else 0)
+    base_pos_block_w = mm_to_pt(getattr(s, "card_position_width_mm", DEFAULT_CARD_POSITION_WIDTH_MM) or DEFAULT_CARD_POSITION_WIDTH_MM)
+    position_font_size = getattr(s, "card_position_font_pt", DEFAULT_CARD_POSITION_FONT_PT) or DEFAULT_CARD_POSITION_FONT_PT
+    position_line_height = position_font_size + 0.6
 
     def _fmt_mm(v):
         if v is None:
@@ -4920,8 +4991,8 @@ def cards_pdf():
         row = (idx // cols) % rows
         if idx > 0 and idx % (cols * rows) == 0:
             c.showPage()
-        x = margin + col * (card_w + gap_h)
-        y = page_h - margin - card_h - row * (card_h + gap_v)
+        x = margin_x + col * (card_w + gap)
+        y = page_h - margin_y - card_h - row * (card_h + gap)
 
         bg_inset = mm_to_pt(0.5)
         bg_w = max(card_w - (bg_inset * 2), 0)
@@ -4936,13 +5007,56 @@ def cards_pdf():
         cy = y + card_h - padding
         c.setFillColorRGB(0, 0, 0)
 
+        pos_texts = None
+        pos_block_w = base_pos_block_w
+        pos_font_size = position_font_size
+        pos_line_height = position_line_height
+        custom_slot_label = False
+        pos_data = pos_by_item.get(item.id)
+        if pos_data:
+            cab, slot = pos_data
+            col_code = getattr(slot, "col_code", "") or ""
+            row_num = getattr(slot, "row_num", None)
+            label_txt = slot_label(slot, for_display=False, fallback_col=col_code, fallback_row=row_num)
+            row_col_lines = []
+            if row_num is not None and col_code:
+                row_col_lines = [f"Rig: {int(row_num)}", f"Col: {col_code.upper()}"]
+            if slot and slot.print_label_override:
+                custom_slot_label = True
+                pos_font_size = max(position_font_size - 1.0, 4.0)
+                available_w = max(pos_block_w - mm_to_pt(1), mm_to_pt(6))
+                pos_texts = wrap_to_lines(label_txt, "Helvetica-Bold", pos_font_size, available_w, max_lines=2) or [label_txt]
+                pos_line_height = pos_font_size + 0.6
+                combined_lines = list(pos_texts) + row_col_lines
+                available_h = qr_box if qr_box else card_h - padding
+                while combined_lines and (pos_line_height * len(combined_lines)) > available_h and pos_font_size > 4.0:
+                    pos_font_size = max(pos_font_size - 0.4, 4.0)
+                    pos_line_height = pos_font_size + 0.6
+                    pos_texts = wrap_to_lines(label_txt, "Helvetica-Bold", pos_font_size, available_w, max_lines=2) or [label_txt]
+                    combined_lines = list(pos_texts) + row_col_lines
+                pos_texts = combined_lines or row_col_lines
+                if pos_texts:
+                    max_width = max(pdfmetrics.stringWidth(txt, "Helvetica-Bold", pos_font_size) for txt in pos_texts)
+                    pos_block_w = max(pos_block_w, max_width + mm_to_pt(1))
+            elif row_col_lines:
+                pos_texts = row_col_lines
+                required_w = max(pdfmetrics.stringWidth(txt, "Helvetica-Bold", pos_font_size) for txt in pos_texts) + mm_to_pt(1)
+                pos_block_w = max(pos_block_w, required_w)
+            elif label_txt:
+                pos_texts = [label_txt]
+                required_w = pdfmetrics.stringWidth(label_txt, "Helvetica-Bold", pos_font_size) + mm_to_pt(1)
+                pos_block_w = max(pos_block_w, required_w)
+
+        text_right_edge = x + card_w - padding - qr_area_width - (pos_block_w if pos_texts else 0)
+        text_area_w = max(text_right_edge - (x + padding), mm_to_pt(10))
+
         title_font_size = 12
         title_leading = 11
         title_lines = wrap_to_lines(
             auto_name_for(item),
             "Helvetica-Bold",
             title_font_size,
-            card_w - 2 * padding,
+            text_area_w,
             max_lines=2,
         )
         c.setFont("Helvetica-Bold", title_font_size)
@@ -4951,17 +5065,20 @@ def cards_pdf():
             c.drawString(x + padding, cy, ln)
             cy -= 2
 
-        pos_data = pos_by_item.get(item.id)
-        if pos_data:
-            cab, slot = pos_data
-            cab_name = cab.name if cab else ""
-            col_code = getattr(slot, "col_code", "") if slot else ""
-            row_num = getattr(slot, "row_num", None) if slot else None
-            pos_label = make_full_position(cab_name, col_code, row_num)
-            cy -= 11
-            c.setFont("Helvetica-Bold", 9.5)
-            c.drawString(x + padding, cy, f"Posizione: {pos_label}")
-            cy -= 2
+        if pos_texts:
+            pos_x = x + card_w - padding - qr_area_width - pos_block_w
+            if qr_box:
+                block_height = pos_line_height * len(pos_texts)
+                start_y = y + qr_margin + max((qr_box - block_height) / 2, 0) + block_height - pos_font_size
+            else:
+                start_y = y + card_h - padding - pos_font_size
+            if custom_slot_label:
+                start_y -= mm_to_pt(0.5)
+            c.setFont("Helvetica-Bold", pos_font_size)
+            line_y = start_y
+            for txt in pos_texts:
+                c.drawString(pos_x, line_y, txt)
+                line_y -= pos_line_height
 
         details = []
         dim = _fmt_mm(item.outer_d_mm if not (is_screw(item) or is_standoff(item) or is_spacer(item)) else item.length_mm)
@@ -4988,7 +5105,7 @@ def cards_pdf():
             cy -= 4
 
         if item.description:
-            desc_lines = wrap_to_lines(item.description, "Helvetica-Oblique", 9, card_w - 2 * padding, max_lines=3)
+            desc_lines = wrap_to_lines(item.description, "Helvetica-Oblique", 9, text_area_w, max_lines=3)
             if desc_lines:
                 c.setFont("Helvetica-Oblique", 9)
                 for ln in desc_lines:
@@ -4998,6 +5115,27 @@ def cards_pdf():
                     cy = next_y
                     c.drawString(x + padding, cy, ln)
                 cy -= 2
+
+        if qr_box:
+            try:
+                if s.qr_base_url:
+                    url = f"{s.qr_base_url.rstrip('/')}/api/items/{item.id}.json"
+                else:
+                    url = f"{request.host_url.rstrip('/')}/api/items/{item.id}.json"
+                qr_code = qrmod.QrCodeWidget(url)
+                bounds = qr_code.getBounds()
+                w = bounds[2] - bounds[0]
+                h = bounds[3] - bounds[1]
+                scale = min(qr_box / w, qr_box / h)
+                d = Drawing(w, h)
+                d.add(qr_code)
+                c.saveState()
+                c.translate(x + card_w - padding - qr_box - qr_margin, y + qr_margin)
+                c.scale(scale, scale)
+                renderPDF.draw(d, c, 0, 0)
+                c.restoreState()
+            except Exception:
+                pass
 
     c.save()
     buf.seek(0)
@@ -5022,9 +5160,15 @@ def seed_if_empty_or_missing():
             label_position_font_pt=DEFAULT_LABEL_POSITION_FONT_PT,
             label_page_format=DEFAULT_LABEL_PAGE_FORMAT,
             card_w_mm=DEFAULT_CARD_W_MM, card_h_mm=DEFAULT_CARD_H_MM,
+            card_margin_tb_mm=DEFAULT_CARD_MARGIN_TB_MM, card_margin_lr_mm=DEFAULT_CARD_MARGIN_LR_MM,
+            card_gap_mm=DEFAULT_CARD_GAP_MM, card_padding_mm=DEFAULT_CARD_PADDING_MM,
+            card_qr_size_mm=DEFAULT_CARD_QR_SIZE_MM, card_qr_margin_mm=DEFAULT_CARD_QR_MARGIN_MM,
+            card_position_width_mm=DEFAULT_CARD_POSITION_WIDTH_MM,
+            card_position_font_pt=DEFAULT_CARD_POSITION_FONT_PT,
             card_gap_h_mm=DEFAULT_CARD_GAP_H_MM, card_gap_v_mm=DEFAULT_CARD_GAP_V_MM,
             card_page_format=DEFAULT_CARD_PAGE_FORMAT,
             orientation_landscape=DEFAULT_ORIENTATION_LANDSCAPE,
+            card_orientation_landscape=DEFAULT_CARD_ORIENTATION_LANDSCAPE,
             qr_default=DEFAULT_QR_DEFAULT, qr_base_url=DEFAULT_QR_BASE_URL
         ))
     thread_standards = [
