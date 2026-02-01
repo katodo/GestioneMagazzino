@@ -275,53 +275,76 @@
   <div class="col-12">
     <div class="form-section" id="stampa-etichette">
       <h5>Stampa etichette & QR</h5>
-      <form method="post" action="{{ url_for('update_settings') }}" class="row g-2">
-        <div class="col-6"><label class="form-label">Larghezza (mm)</label><input type="number" step="0.1" class="form-control" name="label_w_mm" value="{{ settings.label_w_mm }}"></div>
-        <div class="col-6"><label class="form-label">Altezza (mm)</label><input type="number" step="0.1" class="form-control" name="label_h_mm" value="{{ settings.label_h_mm }}"></div>
-        <div class="col-6">
-          <label class="form-label">Formato foglio etichette</label>
-          <select class="form-select" name="label_page_format">
-            {% for value, label in page_format_options %}
-              <option value="{{ value }}" {{ 'selected' if settings.label_page_format == value else '' }}>{{ label }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="col-6"><label class="form-label">Margini top/bottom (mm)</label><input type="number" step="0.1" class="form-control" name="margin_tb_mm" value="{{ settings.margin_tb_mm }}"></div>
-        <div class="col-6"><label class="form-label">Margini sx/dx (mm)</label><input type="number" step="0.1" class="form-control" name="margin_lr_mm" value="{{ settings.margin_lr_mm }}"></div>
-        <div class="col-6"><label class="form-label">Spazio tra etichette (mm)</label><input type="number" step="0.1" class="form-control" name="gap_mm" value="{{ settings.gap_mm }}"></div>
-        <div class="col-6"><label class="form-label">Padding interno (mm)</label><input type="number" step="0.1" class="form-control" name="label_padding_mm" value="{{ settings.label_padding_mm }}"></div>
-        <div class="col-6"><label class="form-label">Dimensione QR (mm)</label><input type="number" step="0.1" class="form-control" name="label_qr_size_mm" value="{{ settings.label_qr_size_mm }}"></div>
-        <div class="col-6"><label class="form-label">Margine QR (mm)</label><input type="number" step="0.1" class="form-control" name="label_qr_margin_mm" value="{{ settings.label_qr_margin_mm }}"></div>
-        <div class="col-6"><label class="form-label">Larghezza blocco posizione (mm)</label><input type="number" step="0.1" class="form-control" name="label_position_width_mm" value="{{ settings.label_position_width_mm }}"></div>
-        <div class="col-6"><label class="form-label">Dimensione testo posizione (pt)</label><input type="number" step="0.1" class="form-control" name="label_position_font_pt" value="{{ settings.label_position_font_pt }}"></div>
-        <div class="col-6"><label class="form-label">Cartellini: larghezza (mm)</label><input type="number" step="0.1" class="form-control" name="card_w_mm" value="{{ settings.card_w_mm }}"></div>
-        <div class="col-6"><label class="form-label">Cartellini: altezza (mm)</label><input type="number" step="0.1" class="form-control" name="card_h_mm" value="{{ settings.card_h_mm }}"></div>
-        <div class="col-6">
-          <label class="form-label">Formato foglio cartellini</label>
-          <select class="form-select" name="card_page_format">
-            {% for value, label in page_format_options %}
-              <option value="{{ value }}" {{ 'selected' if settings.card_page_format == value else '' }}>{{ label }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="col-6">
-          <label class="form-label">Orientamento</label>
-          <select class="form-select" name="orientation_landscape">
-            <option value="1" {{ 'selected' if settings.orientation_landscape else '' }}>Orizzontale</option>
-            <option value=""  {{ '' if settings.orientation_landscape else 'selected' }}>Verticale</option>
-          </select>
-        </div>
-        <div class="col-6">
-          <label class="form-label">QR attivo di default</label>
-          <select class="form-select" name="qr_default">
-            <option value="1" {{ 'selected' if settings.qr_default else '' }}>Sì</option>
-            <option value="">No</option>
-          </select>
+      <form method="post" action="{{ url_for('update_settings') }}" class="row g-3">
+        <div class="col-12">
+          <div class="border rounded p-3">
+            <h6 class="text-uppercase text-muted mb-3">Etichette cassetti</h6>
+            <div class="row g-2">
+              <div class="col-6"><label class="form-label">Larghezza (mm)</label><input type="number" step="0.1" class="form-control" name="label_w_mm" value="{{ settings.label_w_mm }}"></div>
+              <div class="col-6"><label class="form-label">Altezza (mm)</label><input type="number" step="0.1" class="form-control" name="label_h_mm" value="{{ settings.label_h_mm }}"></div>
+              <div class="col-6">
+                <label class="form-label">Formato foglio etichette</label>
+                <select class="form-select" name="label_page_format">
+                  {% for value, label in page_format_options %}
+                    <option value="{{ value }}" {{ 'selected' if settings.label_page_format == value else '' }}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-6">
+                <label class="form-label">Orientamento</label>
+                <select class="form-select" name="orientation_landscape">
+                  <option value="1" {{ 'selected' if settings.orientation_landscape else '' }}>Orizzontale</option>
+                  <option value=""  {{ '' if settings.orientation_landscape else 'selected' }}>Verticale</option>
+                </select>
+              </div>
+              <div class="col-6"><label class="form-label">Margini top/bottom (mm)</label><input type="number" step="0.1" class="form-control" name="margin_tb_mm" value="{{ settings.margin_tb_mm }}"></div>
+              <div class="col-6"><label class="form-label">Margini sx/dx (mm)</label><input type="number" step="0.1" class="form-control" name="margin_lr_mm" value="{{ settings.margin_lr_mm }}"></div>
+              <div class="col-6"><label class="form-label">Spazio tra etichette (mm)</label><input type="number" step="0.1" class="form-control" name="gap_mm" value="{{ settings.gap_mm }}"></div>
+              <div class="col-6"><label class="form-label">Padding interno (mm)</label><input type="number" step="0.1" class="form-control" name="label_padding_mm" value="{{ settings.label_padding_mm }}"></div>
+              <div class="col-6"><label class="form-label">Dimensione QR (mm)</label><input type="number" step="0.1" class="form-control" name="label_qr_size_mm" value="{{ settings.label_qr_size_mm }}"></div>
+              <div class="col-6"><label class="form-label">Margine QR (mm)</label><input type="number" step="0.1" class="form-control" name="label_qr_margin_mm" value="{{ settings.label_qr_margin_mm }}"></div>
+              <div class="col-6"><label class="form-label">Larghezza blocco posizione (mm)</label><input type="number" step="0.1" class="form-control" name="label_position_width_mm" value="{{ settings.label_position_width_mm }}"></div>
+              <div class="col-6"><label class="form-label">Dimensione testo posizione (pt)</label><input type="number" step="0.1" class="form-control" name="label_position_font_pt" value="{{ settings.label_position_font_pt }}"></div>
+            </div>
+          </div>
         </div>
         <div class="col-12">
-          <label class="form-label">QR Base URL (opz.)</label>
-          <input class="form-control" name="qr_base_url" placeholder="https://magazzino.local" value="{{ settings.qr_base_url or '' }}">
-          <small class="text-muted">Se vuoto, uso l'host corrente.</small>
+          <div class="border rounded p-3">
+            <h6 class="text-uppercase text-muted mb-3">Cartellini</h6>
+            <div class="row g-2">
+              <div class="col-6"><label class="form-label">Larghezza (mm)</label><input type="number" step="0.1" class="form-control" name="card_w_mm" value="{{ settings.card_w_mm }}"></div>
+              <div class="col-6"><label class="form-label">Altezza (mm)</label><input type="number" step="0.1" class="form-control" name="card_h_mm" value="{{ settings.card_h_mm }}"></div>
+              <div class="col-6"><label class="form-label">Spaziatura orizzontale (mm)</label><input type="number" step="0.1" class="form-control" name="card_gap_h_mm" value="{{ settings.card_gap_h_mm }}"></div>
+              <div class="col-6"><label class="form-label">Spaziatura verticale (mm)</label><input type="number" step="0.1" class="form-control" name="card_gap_v_mm" value="{{ settings.card_gap_v_mm }}"></div>
+              <div class="col-6">
+                <label class="form-label">Formato foglio cartellini</label>
+                <select class="form-select" name="card_page_format">
+                  {% for value, label in page_format_options %}
+                    <option value="{{ value }}" {{ 'selected' if settings.card_page_format == value else '' }}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="col-12">
+          <div class="border rounded p-3">
+            <h6 class="text-uppercase text-muted mb-3">QR</h6>
+            <div class="row g-2">
+              <div class="col-6">
+                <label class="form-label">QR attivo di default</label>
+                <select class="form-select" name="qr_default">
+                  <option value="1" {{ 'selected' if settings.qr_default else '' }}>Sì</option>
+                  <option value="">No</option>
+                </select>
+              </div>
+              <div class="col-12">
+                <label class="form-label">QR Base URL (opz.)</label>
+                <input class="form-control" name="qr_base_url" placeholder="https://magazzino.local" value="{{ settings.qr_base_url or '' }}">
+                <small class="text-muted">Se vuoto, uso l'host corrente.</small>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="col-12 text-end mt-2"><button class="btn btn-primary">Salva impostazioni</button></div>
       </form>
