@@ -4509,12 +4509,11 @@ def labels_pdf():
 
     def crop_marks(cx, cy, w, h):
         mark = mm_to_pt(1.2)
-        c.setStrokeGray(0.7); c.setLineWidth(0.2)
+        c.setStrokeColorRGB(0, 0, 0); c.setLineWidth(0.2)
         c.line(cx,        cy+h, cx+mark, cy+h); c.line(cx+w-mark, cy+h, cx+w,    cy+h)
         c.line(cx,        cy,   cx+mark, cy);   c.line(cx+w-mark, cy,   cx+w,    cy)
         c.line(cx,        cy+h, cx,      cy+h-mark); c.line(cx,  cy,   cx,      cy+mark)
         c.line(cx+w,      cy+h, cx+w,    cy+h-mark); c.line(cx+w,cy,   cx+w,    cy+mark)
-        c.setStrokeGray(0.85); c.rect(cx, cy, w, h, stroke=1, fill=0)
 
     title_font = "Helvetica-Bold"
     title_size = 7.2
@@ -4640,11 +4639,17 @@ def labels_pdf():
         crop_marks(x, y, lab_w, lab_h)
         try:
             colhex = entry.get("color") or "#000000"
-            c.setStrokeColor(HexColor(colhex))
-            c.setLineWidth(0.8)
-            c.rect(x, y, lab_w, lab_h, stroke=1, fill=0)
+            bg_inset = mm_to_pt(0.5)
+            bg_w = max(lab_w - (bg_inset * 2), 0)
+            bg_h = max(lab_h - (bg_inset * 2), 0)
+            if bg_w > 0 and bg_h > 0:
+                c.setFillColor(HexColor(colhex))
+                c.rect(x + bg_inset, y + bg_inset, bg_w, bg_h, stroke=0, fill=1)
         except Exception:
             pass
+        c.setStrokeColorRGB(0, 0, 0)
+        c.setLineWidth(0.3)
+        c.rect(x, y, lab_w, lab_h, stroke=1, fill=0)
 
         pos_data = entry.get("position") or (None, None)
         cab, slot = pos_data
