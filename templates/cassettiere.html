@@ -42,7 +42,7 @@
   {% endfor %}
 </div>
 
-<div class="grid-wrap p-2 bg-white">
+<div class="grid-wrap p-2">
   {% if grid.rows and grid.cols %}
   <table class="grid-table" id="grid" data-cab="{{ grid.cab.id }}" data-comp="{{ grid.cab.comp }}">
     <thead>
@@ -474,11 +474,53 @@ function toggleDrawerSelection(td){
   updateDrawerSelectionCount();
 }
 
+function parseRgbColor(color) {
+  if (!color) return null;
+  const rgbMatch = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+  if (rgbMatch) {
+    return {
+      r: Number(rgbMatch[1]),
+      g: Number(rgbMatch[2]),
+      b: Number(rgbMatch[3])
+    };
+  }
+  const hexMatch = color.trim().match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (hexMatch) {
+    let hex = hexMatch[1];
+    if (hex.length === 3) {
+      hex = hex.split('').map(ch => ch + ch).join('');
+    }
+    return {
+      r: parseInt(hex.slice(0, 2), 16),
+      g: parseInt(hex.slice(2, 4), 16),
+      b: parseInt(hex.slice(4, 6), 16)
+    };
+  }
+  return null;
+}
+
+function updateCellTextContrast() {
+  document.querySelectorAll('#grid td.cell-used, #grid td.cell-blocked').forEach(cell => {
+    const inner = cell.querySelector('.cell-inner');
+    if (!inner) return;
+    const bgColor = window.getComputedStyle(cell).backgroundColor;
+    const rgb = parseRgbColor(bgColor);
+    if (!rgb) return;
+    const luminance = (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255;
+    const textColor = luminance > 0.6 ? '#111' : '#fff';
+    inner.style.setProperty('--cell-text-color', textColor);
+    inner.style.textShadow = textColor === '#111'
+      ? '0 1px 1px rgba(255,255,255,0.25)'
+      : '0 1px 1px rgba(0,0,0,0.35)';
+  });
+}
+
 document.addEventListener('DOMContentLoaded', function(){
   const grid = document.getElementById('grid');
   if (!grid) return;
   let pendingUsedCell = null;
   initCellPopovers('grid');
+  updateCellTextContrast();
 
   const printModeToggle = document.getElementById('printModeToggle');
   document.getElementById('clearDrawerSelection')?.addEventListener('click', clearDrawerSelection);
