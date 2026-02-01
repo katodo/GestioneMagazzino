@@ -4859,6 +4859,7 @@ def cards_pdf():
                    .filter(Assignment.item_id.in_(ids))
                    .all())
     pos_by_item = {item_id: (cab, slot) for item_id, cab, slot in assignments}
+    original_order = {item.id: idx for idx, item in enumerate(items)}
 
     s = get_settings()
     page_size = portrait(page_size_for_format(s.card_page_format))
@@ -4889,6 +4890,18 @@ def cards_pdf():
             return str(int(round(v)))
         return f"{v:.1f}".rstrip("0").rstrip(".")
 
+    def _card_sort_key(item: Item):
+        pos_data = pos_by_item.get(item.id)
+        if pos_data:
+            cab, slot = pos_data
+            if cab and slot:
+                col_code = getattr(slot, "col_code", "") or ""
+                row_num = getattr(slot, "row_num", 0) or 0
+                return (0, cab.name or "", int(row_num), colcode_to_idx(col_code), original_order.get(item.id, 0))
+        return (1, original_order.get(item.id, 0))
+
+    items.sort(key=_card_sort_key)
+
     for idx, item in enumerate(items):
         col = idx % cols
         row = (idx // cols) % rows
@@ -4897,12 +4910,17 @@ def cards_pdf():
         x = margin + col * (card_w + gap)
         y = page_h - margin - card_h - row * (card_h + gap)
 
-        c.setStrokeGray(0.8)
-        c.setLineWidth(0.7)
+        bg_inset = mm_to_pt(0.5)
+        bg_w = max(card_w - (bg_inset * 2), 0)
+        bg_h = max(card_h - (bg_inset * 2), 0)
+        if bg_w > 0 and bg_h > 0:
+            c.setFillColor(HexColor(item.category.color if item.category else "#000000"))
+            c.rect(x + bg_inset, y + bg_inset, bg_w, bg_h, fill=1, stroke=0)
+
+        c.setStrokeColorRGB(0, 0, 0)
+        c.setLineWidth(0.3)
         c.rect(x, y, card_w, card_h, stroke=1, fill=0)
         cy = y + card_h - padding
-        c.setFillColor(HexColor(item.category.color if item.category else "#000000"))
-        c.rect(x, y + card_h - 3, card_w, 3, fill=1, stroke=0)
         c.setFillColorRGB(0, 0, 0)
 
         title_font_size = 12
@@ -4918,6 +4936,18 @@ def cards_pdf():
         for ln in title_lines:
             cy -= title_leading
             c.drawString(x + padding, cy, ln)
+            cy -= 2
+
+        pos_data = pos_by_item.get(item.id)
+        if pos_data:
+            cab, slot = pos_data
+            cab_name = cab.name if cab else ""
+            col_code = getattr(slot, "col_code", "") if slot else ""
+            row_num = getattr(slot, "row_num", None) if slot else None
+            pos_label = make_full_position(cab_name, col_code, row_num)
+            cy -= 11
+            c.setFont("Helvetica-Bold", 9.5)
+            c.drawString(x + padding, cy, f"Posizione: {pos_label}")
             cy -= 2
 
         details = []
@@ -4937,7 +4967,10 @@ def cards_pdf():
         if details:
             c.setFont("Helvetica", 9.5)
             for det in details:
-                cy -= 11
+                next_y = cy - 11
+                if next_y < y + padding:
+                    break
+                cy = next_y
                 c.drawString(x + padding, cy, det)
             cy -= 4
 
@@ -4946,19 +4979,12 @@ def cards_pdf():
             if desc_lines:
                 c.setFont("Helvetica-Oblique", 9)
                 for ln in desc_lines:
-                    cy -= 11
+                    next_y = cy - 11
+                    if next_y < y + padding:
+                        break
+                    cy = next_y
                     c.drawString(x + padding, cy, ln)
                 cy -= 2
-
-        pos_data = pos_by_item.get(item.id)
-        if pos_data:
-            cab, slot = pos_data
-            cy -= 12
-            cab_name = cab.name if cab else ""
-            col_code = getattr(slot, "col_code", "") if slot else ""
-            row_num = getattr(slot, "row_num", None) if slot else None
-            pos_label = make_full_position(cab_name, col_code, row_num)
-            c.drawString(x + padding, cy, f"Posizione: {pos_label}")
 
     c.save()
     buf.seek(0)
