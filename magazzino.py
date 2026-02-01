@@ -38,6 +38,8 @@ DEFAULT_LABEL_POSITION_WIDTH_MM = 12
 DEFAULT_LABEL_POSITION_FONT_PT = 7.0
 DEFAULT_CARD_W_MM = 61
 DEFAULT_CARD_H_MM = 30
+DEFAULT_CARD_GAP_H_MM = 6
+DEFAULT_CARD_GAP_V_MM = 6
 DEFAULT_ORIENTATION_LANDSCAPE = True
 DEFAULT_LABEL_PAGE_FORMAT = "A4"
 DEFAULT_CARD_PAGE_FORMAT = "A4"
@@ -278,6 +280,8 @@ class Settings(db.Model):
     label_page_format = db.Column(db.String(10), nullable=False, default=DEFAULT_LABEL_PAGE_FORMAT)
     card_w_mm = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_W_MM)
     card_h_mm = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_H_MM)
+    card_gap_h_mm = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_GAP_H_MM)
+    card_gap_v_mm = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_GAP_V_MM)
     card_page_format = db.Column(db.String(10), nullable=False, default=DEFAULT_CARD_PAGE_FORMAT)
     orientation_landscape = db.Column(db.Boolean, nullable=False, default=DEFAULT_ORIENTATION_LANDSCAPE)
     qr_default = db.Column(db.Boolean, nullable=False, default=DEFAULT_QR_DEFAULT)
@@ -899,6 +903,8 @@ def ensure_settings_columns():
         ("label_page_format", "VARCHAR(10)", DEFAULT_LABEL_PAGE_FORMAT),
         ("card_w_mm", "REAL", DEFAULT_CARD_W_MM),
         ("card_h_mm", "REAL", DEFAULT_CARD_H_MM),
+        ("card_gap_h_mm", "REAL", DEFAULT_CARD_GAP_H_MM),
+        ("card_gap_v_mm", "REAL", DEFAULT_CARD_GAP_V_MM),
         ("card_page_format", "VARCHAR(10)", DEFAULT_CARD_PAGE_FORMAT),
     ]
     added = False
@@ -1127,6 +1133,8 @@ def get_settings()->Settings:
                      label_page_format=DEFAULT_LABEL_PAGE_FORMAT,
                      card_w_mm=DEFAULT_CARD_W_MM,
                      card_h_mm=DEFAULT_CARD_H_MM,
+                     card_gap_h_mm=DEFAULT_CARD_GAP_H_MM,
+                     card_gap_v_mm=DEFAULT_CARD_GAP_V_MM,
                      card_page_format=DEFAULT_CARD_PAGE_FORMAT,
                      orientation_landscape=DEFAULT_ORIENTATION_LANDSCAPE,
                      qr_default=DEFAULT_QR_DEFAULT,
@@ -1144,6 +1152,8 @@ def get_settings()->Settings:
         changed = True
     if s.card_w_mm is None: s.card_w_mm = DEFAULT_CARD_W_MM; changed = True
     if s.card_h_mm is None: s.card_h_mm = DEFAULT_CARD_H_MM; changed = True
+    if getattr(s, "card_gap_h_mm", None) is None: s.card_gap_h_mm = DEFAULT_CARD_GAP_H_MM; changed = True
+    if getattr(s, "card_gap_v_mm", None) is None: s.card_gap_v_mm = DEFAULT_CARD_GAP_V_MM; changed = True
     normalized_card_format = normalize_page_format(getattr(s, "card_page_format", None), DEFAULT_CARD_PAGE_FORMAT)
     if getattr(s, "card_page_format", None) != normalized_card_format:
         s.card_page_format = normalized_card_format
@@ -3299,6 +3309,8 @@ def update_settings():
         s.label_page_format = normalize_page_format(request.form.get("label_page_format"), DEFAULT_LABEL_PAGE_FORMAT)
         s.card_w_mm = float(request.form.get("card_w_mm"))
         s.card_h_mm = float(request.form.get("card_h_mm"))
+        s.card_gap_h_mm = float(request.form.get("card_gap_h_mm"))
+        s.card_gap_v_mm = float(request.form.get("card_gap_v_mm"))
         s.card_page_format = normalize_page_format(request.form.get("card_page_format"), DEFAULT_CARD_PAGE_FORMAT)
         s.orientation_landscape = bool(request.form.get("orientation_landscape"))
         s.qr_default  = bool(request.form.get("qr_default"))
@@ -4868,11 +4880,12 @@ def cards_pdf():
     page_w, page_h = page_size
 
     margin = mm_to_pt(12)
-    gap = mm_to_pt(6)
+    gap_h = mm_to_pt(getattr(s, "card_gap_h_mm", DEFAULT_CARD_GAP_H_MM) or DEFAULT_CARD_GAP_H_MM)
+    gap_v = mm_to_pt(getattr(s, "card_gap_v_mm", DEFAULT_CARD_GAP_V_MM) or DEFAULT_CARD_GAP_V_MM)
     card_w = mm_to_pt(getattr(s, "card_w_mm", DEFAULT_CARD_W_MM) or DEFAULT_CARD_W_MM)
     card_h = mm_to_pt(getattr(s, "card_h_mm", DEFAULT_CARD_H_MM) or DEFAULT_CARD_H_MM)
-    cols = int((page_w - 2 * margin + gap) // (card_w + gap))
-    rows = int((page_h - 2 * margin + gap) // (card_h + gap))
+    cols = int((page_w - 2 * margin + gap_h) // (card_w + gap_h))
+    rows = int((page_h - 2 * margin + gap_v) // (card_h + gap_v))
     if cols < 1 or rows < 1:
         label_format_name = page_format_label(s.card_page_format)
         flash(f"Configurazione cartellini non valida rispetto al formato {label_format_name}.", "danger")
@@ -4907,8 +4920,8 @@ def cards_pdf():
         row = (idx // cols) % rows
         if idx > 0 and idx % (cols * rows) == 0:
             c.showPage()
-        x = margin + col * (card_w + gap)
-        y = page_h - margin - card_h - row * (card_h + gap)
+        x = margin + col * (card_w + gap_h)
+        y = page_h - margin - card_h - row * (card_h + gap_v)
 
         bg_inset = mm_to_pt(0.5)
         bg_w = max(card_w - (bg_inset * 2), 0)
@@ -5009,6 +5022,7 @@ def seed_if_empty_or_missing():
             label_position_font_pt=DEFAULT_LABEL_POSITION_FONT_PT,
             label_page_format=DEFAULT_LABEL_PAGE_FORMAT,
             card_w_mm=DEFAULT_CARD_W_MM, card_h_mm=DEFAULT_CARD_H_MM,
+            card_gap_h_mm=DEFAULT_CARD_GAP_H_MM, card_gap_v_mm=DEFAULT_CARD_GAP_V_MM,
             card_page_format=DEFAULT_CARD_PAGE_FORMAT,
             orientation_landscape=DEFAULT_ORIENTATION_LANDSCAPE,
             qr_default=DEFAULT_QR_DEFAULT, qr_base_url=DEFAULT_QR_BASE_URL
