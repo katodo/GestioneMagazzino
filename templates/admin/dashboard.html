@@ -299,10 +299,11 @@
   </form>
   <form id="labelForm" method="post" action="{{ url_for('labels_pdf') }}">
     <div class="d-flex justify-content-between align-items-center mb-2">
-      <div class="text-end">
-        <div class="d-flex gap-2 justify-content-end">
-          <button class="btn btn-sm btn-primary" type="submit" formaction="{{ url_for('labels_pdf') }}">Stampa etichette</button>
-          <button class="btn btn-sm btn-outline-primary" type="submit" formaction="{{ url_for('cards_pdf') }}">Stampa Cartellini</button>
+      <div class="text-end w-100">
+        <div class="d-flex gap-2 justify-content-end flex-wrap">
+          <button class="btn btn-sm btn-primary" type="submit" formaction="{{ url_for('labels_pdf') }}">Stampa etichette (fogli)</button>
+          <button class="btn btn-sm btn-outline-primary" type="submit" formaction="{{ url_for('cards_pdf') }}">Stampa cartellini (fogli)</button>
+          <button class="btn btn-sm btn-outline-dark" type="submit" formaction="{{ url_for('dymo_labels_pdf') }}">Stampa etichette DYMO</button>
         </div>
         <div class="form-text">Se non selezioni nulla, verranno stampati tutti gli articoli.</div>
       </div>

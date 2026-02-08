@@ -20,8 +20,9 @@
         <label class="form-check-label small" for="multiItemsOnlyToggle">Solo cassetti con più articoli (cartellini)</label>
       </div>
       <div class="small text-muted">Selezionati: <span id="selectedDrawerCount">0</span></div>
-      <button class="btn btn-sm btn-primary" type="submit" formaction="{{ url_for('labels_pdf') }}">Stampa etichette</button>
-      <button class="btn btn-sm btn-outline-primary" type="submit" formaction="{{ url_for('cards_pdf') }}">Stampa cartellini</button>
+      <button class="btn btn-sm btn-primary" type="submit" formaction="{{ url_for('labels_pdf') }}">Stampa etichette (fogli)</button>
+      <button class="btn btn-sm btn-outline-primary" type="submit" formaction="{{ url_for('cards_pdf') }}">Stampa cartellini (fogli)</button>
+      <button class="btn btn-sm btn-outline-dark" type="submit" formaction="{{ url_for('dymo_labels_pdf') }}">Stampa etichette DYMO</button>
       <button class="btn btn-sm btn-outline-secondary" type="button" id="clearDrawerSelection">Svuota</button>
     </form>
     {% endif %}

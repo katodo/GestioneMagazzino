@@ -234,8 +234,9 @@
     <h5 class="mb-0">Griglia articoli</h5>
     {% if can_manage_items %}
       <div class="d-flex flex-wrap gap-2">
-        <button class="btn btn-sm btn-primary" type="submit" form="labelForm" formaction="{{ url_for('labels_pdf') }}">Stampa etichette</button>
-        <button class="btn btn-sm btn-outline-primary" type="submit" form="labelForm" formaction="{{ url_for('cards_pdf') }}">Stampa cartellini</button>
+        <button class="btn btn-sm btn-primary" type="submit" form="labelForm" formaction="{{ url_for('labels_pdf') }}">Stampa etichette (fogli)</button>
+        <button class="btn btn-sm btn-outline-primary" type="submit" form="labelForm" formaction="{{ url_for('cards_pdf') }}">Stampa cartellini (fogli)</button>
+        <button class="btn btn-sm btn-outline-dark" type="submit" form="labelForm" formaction="{{ url_for('dymo_labels_pdf') }}">Stampa etichette DYMO</button>
       </div>
     {% endif %}
   </div>
