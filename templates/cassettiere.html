@@ -15,6 +15,10 @@
         <input class="form-check-input" type="checkbox" id="printModeToggle">
         <label class="form-check-label small" for="printModeToggle">Seleziona cassetti da stampare</label>
       </div>
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="multiItemsOnlyToggle">
+        <label class="form-check-label small" for="multiItemsOnlyToggle">Solo cassetti con più articoli (cartellini)</label>
+      </div>
       <div class="small text-muted">Selezionati: <span id="selectedDrawerCount">0</span></div>
       <button class="btn btn-sm btn-primary" type="submit" formaction="{{ url_for('labels_pdf') }}">Stampa etichette</button>
       <button class="btn btn-sm btn-outline-primary" type="submit" formaction="{{ url_for('cards_pdf') }}">Stampa cartellini</button>
@@ -474,6 +478,20 @@ function toggleDrawerSelection(td){
   updateDrawerSelectionCount();
 }
 
+function getMultiItemSlotIds() {
+  const ids = new Set();
+  document.querySelectorAll('#grid td.cell-used').forEach(td => {
+    const slotId = td?.dataset?.slotId;
+    if (!slotId) return;
+    const raw = td.dataset.items;
+    if (!raw) return;
+    let items = [];
+    try { items = JSON.parse(raw); } catch { items = []; }
+    if (items.length > 1) ids.add(slotId);
+  });
+  return ids;
+}
+
 function parseRgbColor(color) {
   if (!color) return null;
   const rgbMatch = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
@@ -533,9 +551,21 @@ document.addEventListener('DOMContentLoaded', function(){
   }
   const drawerPrintForm = document.getElementById('drawerPrintForm');
   if (drawerPrintForm) {
-    drawerPrintForm.addEventListener('submit', () => {
+    drawerPrintForm.addEventListener('submit', (event) => {
+      const submitter = event.submitter;
+      const isCardsSubmit = submitter?.getAttribute('formaction')?.includes('{{ url_for("cards_pdf") }}');
+      const multiToggle = document.getElementById('multiItemsOnlyToggle');
+      let idsToSubmit = new Set(selectedDrawerIds);
+      if (isCardsSubmit && multiToggle?.checked) {
+        const multiIds = getMultiItemSlotIds();
+        if (idsToSubmit.size) {
+          idsToSubmit = new Set([...idsToSubmit].filter(id => multiIds.has(id)));
+        } else {
+          idsToSubmit = multiIds;
+        }
+      }
       drawerPrintForm.querySelectorAll('input[name="slot_ids"]').forEach(el => el.remove());
-      selectedDrawerIds.forEach(id => {
+      idsToSubmit.forEach(id => {
         const input = document.createElement('input');
         input.type = 'hidden';
         input.name = 'slot_ids';
