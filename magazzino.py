@@ -36,6 +36,19 @@ DEFAULT_LABEL_QR_SIZE_MM = 9
 DEFAULT_LABEL_QR_MARGIN_MM = 1
 DEFAULT_LABEL_POSITION_WIDTH_MM = 12
 DEFAULT_LABEL_POSITION_FONT_PT = 7.0
+DEFAULT_DYMO_LABEL_W_MM = 50
+DEFAULT_DYMO_LABEL_H_MM = 12
+DEFAULT_DYMO_MARGIN_X_MM = 1.5
+DEFAULT_DYMO_MARGIN_Y_MM = 1.5
+DEFAULT_DYMO_FONT_NAME = "Helvetica"
+DEFAULT_DYMO_FONT_SIZE_PT = 7.0
+DEFAULT_DYMO_SHOW_CATEGORY = True
+DEFAULT_DYMO_SHOW_SUBTYPE = True
+DEFAULT_DYMO_SHOW_THREAD = True
+DEFAULT_DYMO_SHOW_MEASURE = True
+DEFAULT_DYMO_SHOW_MAIN = True
+DEFAULT_DYMO_SHOW_MATERIAL = True
+DEFAULT_DYMO_SHOW_POSITION = True
 DEFAULT_CARD_W_MM = 61
 DEFAULT_CARD_H_MM = 30
 DEFAULT_CARD_MARGIN_TB_MM = 12
@@ -287,6 +300,19 @@ class Settings(db.Model):
     label_position_width_mm = db.Column(db.Float, nullable=False, default=DEFAULT_LABEL_POSITION_WIDTH_MM)
     label_position_font_pt = db.Column(db.Float, nullable=False, default=DEFAULT_LABEL_POSITION_FONT_PT)
     label_page_format = db.Column(db.String(10), nullable=False, default=DEFAULT_LABEL_PAGE_FORMAT)
+    dymo_label_w_mm = db.Column(db.Float, nullable=False, default=DEFAULT_DYMO_LABEL_W_MM)
+    dymo_label_h_mm = db.Column(db.Float, nullable=False, default=DEFAULT_DYMO_LABEL_H_MM)
+    dymo_margin_x_mm = db.Column(db.Float, nullable=False, default=DEFAULT_DYMO_MARGIN_X_MM)
+    dymo_margin_y_mm = db.Column(db.Float, nullable=False, default=DEFAULT_DYMO_MARGIN_Y_MM)
+    dymo_font_name = db.Column(db.String(80), nullable=False, default=DEFAULT_DYMO_FONT_NAME)
+    dymo_font_size_pt = db.Column(db.Float, nullable=False, default=DEFAULT_DYMO_FONT_SIZE_PT)
+    dymo_show_category = db.Column(db.Boolean, nullable=False, default=DEFAULT_DYMO_SHOW_CATEGORY)
+    dymo_show_subtype = db.Column(db.Boolean, nullable=False, default=DEFAULT_DYMO_SHOW_SUBTYPE)
+    dymo_show_thread = db.Column(db.Boolean, nullable=False, default=DEFAULT_DYMO_SHOW_THREAD)
+    dymo_show_measure = db.Column(db.Boolean, nullable=False, default=DEFAULT_DYMO_SHOW_MEASURE)
+    dymo_show_main = db.Column(db.Boolean, nullable=False, default=DEFAULT_DYMO_SHOW_MAIN)
+    dymo_show_material = db.Column(db.Boolean, nullable=False, default=DEFAULT_DYMO_SHOW_MATERIAL)
+    dymo_show_position = db.Column(db.Boolean, nullable=False, default=DEFAULT_DYMO_SHOW_POSITION)
     card_w_mm = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_W_MM)
     card_h_mm = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_H_MM)
     card_margin_tb_mm = db.Column(db.Float, nullable=False, default=DEFAULT_CARD_MARGIN_TB_MM)
@@ -905,6 +931,73 @@ def label_lines_for_item(item: Item) -> list[str]:
             lines.append(fallback)
     return lines
 
+def dymo_label_lines(item: Item, settings: Settings, position_label: str | None) -> list[str]:
+    lines = []
+    line1_parts = []
+    if settings.dymo_show_category and item.label_show_category and item.category:
+        line1_parts.append(item.category.name)
+    if settings.dymo_show_subtype and item.label_show_subtype and item.subtype:
+        line1_parts.append(item.subtype.name)
+    if settings.dymo_show_thread and item.label_show_thread and item.thread_size:
+        line1_parts.append(item.thread_size)
+    if line1_parts:
+        lines.append(" ".join(line1_parts))
+
+    detail_parts = []
+    if is_screw(item):
+        if settings.dymo_show_main and item.label_show_main:
+            v = format_mm_short(item.length_mm)
+            if v:
+                detail_parts.append(f"{LENGTH_ABBR} {v}")
+        if settings.dymo_show_material and item.label_show_material and item.material:
+            detail_parts.append(item.material.name)
+    elif is_washer(item):
+        if settings.dymo_show_measure and item.label_show_measure:
+            v_i = format_mm_short(getattr(item, "inner_d_mm", None))
+            if v_i:
+                detail_parts.append(f"Øi{v_i}")
+        if settings.dymo_show_main and item.label_show_main:
+            v_e = format_mm_short(item.outer_d_mm)
+            if v_e:
+                detail_parts.append(f"Øe{v_e}")
+            v_s_raw = unified_thickness_value(item)
+            v_s = format_mm_short(v_s_raw)
+            if v_s:
+                prefix = THICKNESS_ABBR if item.thickness_mm is not None else LENGTH_ABBR
+                detail_parts.append(f"{prefix} {v_s}")
+        if settings.dymo_show_material and item.label_show_material and item.material:
+            detail_parts.append(item.material.name)
+    elif is_standoff(item):
+        if settings.dymo_show_main and item.label_show_main:
+            v = format_mm_short(item.length_mm)
+            if v:
+                detail_parts.append(f"{LENGTH_ABBR} {v}")
+        if settings.dymo_show_material and item.label_show_material and item.material:
+            detail_parts.append(item.material.name)
+    else:
+        if settings.dymo_show_main and item.label_show_main:
+            v = format_mm_short(item.outer_d_mm)
+            if v:
+                detail_parts.append(f"Øe{v}")
+            v_s_raw = unified_thickness_value(item)
+            v_s = format_mm_short(v_s_raw)
+            if v_s:
+                prefix = THICKNESS_ABBR if item.thickness_mm is not None else LENGTH_ABBR
+                detail_parts.append(f"{prefix} {v_s}")
+        if settings.dymo_show_material and item.label_show_material and item.material:
+            detail_parts.append(item.material.name)
+    if detail_parts:
+        lines.append(" ".join(detail_parts))
+
+    if settings.dymo_show_position and position_label:
+        lines.append(position_label)
+
+    if not lines:
+        fallback = item.name or auto_name_for(item)
+        if fallback:
+            lines.append(fallback)
+    return lines
+
 def ensure_settings_columns():
     """Aggiunge le nuove colonne delle impostazioni se mancano nel DB SQLite."""
     try:
@@ -919,6 +1012,19 @@ def ensure_settings_columns():
         ("label_position_width_mm", "REAL", DEFAULT_LABEL_POSITION_WIDTH_MM),
         ("label_position_font_pt", "REAL", DEFAULT_LABEL_POSITION_FONT_PT),
         ("label_page_format", "VARCHAR(10)", DEFAULT_LABEL_PAGE_FORMAT),
+        ("dymo_label_w_mm", "REAL", DEFAULT_DYMO_LABEL_W_MM),
+        ("dymo_label_h_mm", "REAL", DEFAULT_DYMO_LABEL_H_MM),
+        ("dymo_margin_x_mm", "REAL", DEFAULT_DYMO_MARGIN_X_MM),
+        ("dymo_margin_y_mm", "REAL", DEFAULT_DYMO_MARGIN_Y_MM),
+        ("dymo_font_name", "VARCHAR(80)", DEFAULT_DYMO_FONT_NAME),
+        ("dymo_font_size_pt", "REAL", DEFAULT_DYMO_FONT_SIZE_PT),
+        ("dymo_show_category", "BOOLEAN", int(DEFAULT_DYMO_SHOW_CATEGORY)),
+        ("dymo_show_subtype", "BOOLEAN", int(DEFAULT_DYMO_SHOW_SUBTYPE)),
+        ("dymo_show_thread", "BOOLEAN", int(DEFAULT_DYMO_SHOW_THREAD)),
+        ("dymo_show_measure", "BOOLEAN", int(DEFAULT_DYMO_SHOW_MEASURE)),
+        ("dymo_show_main", "BOOLEAN", int(DEFAULT_DYMO_SHOW_MAIN)),
+        ("dymo_show_material", "BOOLEAN", int(DEFAULT_DYMO_SHOW_MATERIAL)),
+        ("dymo_show_position", "BOOLEAN", int(DEFAULT_DYMO_SHOW_POSITION)),
         ("card_w_mm", "REAL", DEFAULT_CARD_W_MM),
         ("card_h_mm", "REAL", DEFAULT_CARD_H_MM),
         ("card_margin_tb_mm", "REAL", DEFAULT_CARD_MARGIN_TB_MM),
@@ -1158,6 +1264,19 @@ def get_settings()->Settings:
                      label_position_width_mm=DEFAULT_LABEL_POSITION_WIDTH_MM,
                      label_position_font_pt=DEFAULT_LABEL_POSITION_FONT_PT,
                      label_page_format=DEFAULT_LABEL_PAGE_FORMAT,
+                     dymo_label_w_mm=DEFAULT_DYMO_LABEL_W_MM,
+                     dymo_label_h_mm=DEFAULT_DYMO_LABEL_H_MM,
+                     dymo_margin_x_mm=DEFAULT_DYMO_MARGIN_X_MM,
+                     dymo_margin_y_mm=DEFAULT_DYMO_MARGIN_Y_MM,
+                     dymo_font_name=DEFAULT_DYMO_FONT_NAME,
+                     dymo_font_size_pt=DEFAULT_DYMO_FONT_SIZE_PT,
+                     dymo_show_category=DEFAULT_DYMO_SHOW_CATEGORY,
+                     dymo_show_subtype=DEFAULT_DYMO_SHOW_SUBTYPE,
+                     dymo_show_thread=DEFAULT_DYMO_SHOW_THREAD,
+                     dymo_show_measure=DEFAULT_DYMO_SHOW_MEASURE,
+                     dymo_show_main=DEFAULT_DYMO_SHOW_MAIN,
+                     dymo_show_material=DEFAULT_DYMO_SHOW_MATERIAL,
+                     dymo_show_position=DEFAULT_DYMO_SHOW_POSITION,
                      card_w_mm=DEFAULT_CARD_W_MM,
                      card_h_mm=DEFAULT_CARD_H_MM,
                      card_margin_tb_mm=DEFAULT_CARD_MARGIN_TB_MM,
@@ -1186,6 +1305,19 @@ def get_settings()->Settings:
     if getattr(s, "label_page_format", None) != normalized_label_format:
         s.label_page_format = normalized_label_format
         changed = True
+    if getattr(s, "dymo_label_w_mm", None) is None: s.dymo_label_w_mm = DEFAULT_DYMO_LABEL_W_MM; changed = True
+    if getattr(s, "dymo_label_h_mm", None) is None: s.dymo_label_h_mm = DEFAULT_DYMO_LABEL_H_MM; changed = True
+    if getattr(s, "dymo_margin_x_mm", None) is None: s.dymo_margin_x_mm = DEFAULT_DYMO_MARGIN_X_MM; changed = True
+    if getattr(s, "dymo_margin_y_mm", None) is None: s.dymo_margin_y_mm = DEFAULT_DYMO_MARGIN_Y_MM; changed = True
+    if getattr(s, "dymo_font_name", None) in (None, ""): s.dymo_font_name = DEFAULT_DYMO_FONT_NAME; changed = True
+    if getattr(s, "dymo_font_size_pt", None) is None: s.dymo_font_size_pt = DEFAULT_DYMO_FONT_SIZE_PT; changed = True
+    if getattr(s, "dymo_show_category", None) is None: s.dymo_show_category = DEFAULT_DYMO_SHOW_CATEGORY; changed = True
+    if getattr(s, "dymo_show_subtype", None) is None: s.dymo_show_subtype = DEFAULT_DYMO_SHOW_SUBTYPE; changed = True
+    if getattr(s, "dymo_show_thread", None) is None: s.dymo_show_thread = DEFAULT_DYMO_SHOW_THREAD; changed = True
+    if getattr(s, "dymo_show_measure", None) is None: s.dymo_show_measure = DEFAULT_DYMO_SHOW_MEASURE; changed = True
+    if getattr(s, "dymo_show_main", None) is None: s.dymo_show_main = DEFAULT_DYMO_SHOW_MAIN; changed = True
+    if getattr(s, "dymo_show_material", None) is None: s.dymo_show_material = DEFAULT_DYMO_SHOW_MATERIAL; changed = True
+    if getattr(s, "dymo_show_position", None) is None: s.dymo_show_position = DEFAULT_DYMO_SHOW_POSITION; changed = True
     if s.card_w_mm is None: s.card_w_mm = DEFAULT_CARD_W_MM; changed = True
     if s.card_h_mm is None: s.card_h_mm = DEFAULT_CARD_H_MM; changed = True
     if getattr(s, "card_margin_tb_mm", None) is None: s.card_margin_tb_mm = DEFAULT_CARD_MARGIN_TB_MM; changed = True
@@ -1314,7 +1446,7 @@ def required_permissions_for_path(path: str) -> Optional[set]:
         if any(keyword in path for keyword in ["set_position", "clear_position", "move_slot", "suggest_position"]):
             return {"manage_placements"}
         return {"manage_items"}
-    if path.startswith("/admin/labels") or path.startswith("/admin/cards") or path.startswith("/admin/items/export") or path.startswith("/admin/data"):
+    if path.startswith("/admin/labels") or path.startswith("/admin/cards") or path.startswith("/admin/dymo") or path.startswith("/admin/items/export") or path.startswith("/admin/data"):
         return {"manage_items"}
     if path == "/admin":
         return {"manage_items"}
@@ -3357,6 +3489,19 @@ def update_settings():
         s.label_position_width_mm = float(request.form.get("label_position_width_mm"))
         s.label_position_font_pt = float(request.form.get("label_position_font_pt"))
         s.label_page_format = normalize_page_format(request.form.get("label_page_format"), DEFAULT_LABEL_PAGE_FORMAT)
+        s.dymo_label_w_mm = float(request.form.get("dymo_label_w_mm"))
+        s.dymo_label_h_mm = float(request.form.get("dymo_label_h_mm"))
+        s.dymo_margin_x_mm = float(request.form.get("dymo_margin_x_mm"))
+        s.dymo_margin_y_mm = float(request.form.get("dymo_margin_y_mm"))
+        s.dymo_font_name = (request.form.get("dymo_font_name") or DEFAULT_DYMO_FONT_NAME).strip() or DEFAULT_DYMO_FONT_NAME
+        s.dymo_font_size_pt = float(request.form.get("dymo_font_size_pt"))
+        s.dymo_show_category = bool(request.form.get("dymo_show_category"))
+        s.dymo_show_subtype = bool(request.form.get("dymo_show_subtype"))
+        s.dymo_show_thread = bool(request.form.get("dymo_show_thread"))
+        s.dymo_show_measure = bool(request.form.get("dymo_show_measure"))
+        s.dymo_show_main = bool(request.form.get("dymo_show_main"))
+        s.dymo_show_material = bool(request.form.get("dymo_show_material"))
+        s.dymo_show_position = bool(request.form.get("dymo_show_position"))
         s.card_w_mm = float(request.form.get("card_w_mm"))
         s.card_h_mm = float(request.form.get("card_h_mm"))
         s.card_margin_tb_mm = float(request.form.get("card_margin_tb_mm"))
@@ -4891,6 +5036,94 @@ def labels_pdf():
                 pass
     c.save(); buf.seek(0)
     return send_file(buf, as_attachment=True, download_name="etichette.pdf", mimetype="application/pdf")
+
+@app.route("/admin/dymo/pdf", methods=["POST"])
+@login_required
+def dymo_labels_pdf():
+    try:
+        from reportlab.pdfgen import canvas
+        from reportlab.pdfbase import pdfmetrics
+    except Exception:
+        flash("Per la stampa etichette DYMO installa reportlab: pip install reportlab", "danger")
+        return redirect(request.referrer or url_for("admin_items"))
+
+    slot_ids = [int(x) for x in request.form.getlist("slot_ids") if str(x).isdigit()]
+    ids = request.form.getlist("item_ids")
+    if slot_ids:
+        ids = [
+            row[0]
+            for row in db.session.query(Assignment.item_id)
+            .filter(Assignment.slot_id.in_(slot_ids))
+            .all()
+        ]
+    if not ids:
+        ids = [row[0] for row in db.session.query(Item.id).all()]
+    items = Item.query.filter(Item.id.in_(ids)).order_by(Item.id).all()
+    if not items:
+        flash("Nessun articolo valido per la stampa.", "warning")
+        return redirect(request.referrer or url_for("admin_items"))
+
+    assignments = (db.session.query(Assignment.item_id, Cabinet, Slot)
+                   .join(Slot, Assignment.slot_id == Slot.id)
+                   .join(Cabinet, Slot.cabinet_id == Cabinet.id)
+                   .filter(Assignment.item_id.in_(ids))
+                   .all())
+    pos_by_item = {item_id: (cab, slot) for item_id, cab, slot in assignments}
+
+    s = get_settings()
+    label_w = mm_to_pt(s.dymo_label_w_mm)
+    label_h = mm_to_pt(s.dymo_label_h_mm)
+    margin_x = mm_to_pt(s.dymo_margin_x_mm)
+    margin_y = mm_to_pt(s.dymo_margin_y_mm)
+    font_name = (s.dymo_font_name or DEFAULT_DYMO_FONT_NAME).strip() or DEFAULT_DYMO_FONT_NAME
+    font_size = s.dymo_font_size_pt or DEFAULT_DYMO_FONT_SIZE_PT
+    try:
+        pdfmetrics.getFont(font_name)
+    except Exception:
+        font_name = "Helvetica"
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(label_w, label_h))
+    max_width = max(label_w - (margin_x * 2), mm_to_pt(5))
+    available_height = max(label_h - (margin_y * 2), mm_to_pt(4))
+
+    for idx, item in enumerate(items):
+        if idx > 0:
+            c.showPage()
+        cab, slot = pos_by_item.get(item.id, (None, None))
+        position_label = None
+        if slot or cab:
+            position_label = slot_full_label(cab, slot, for_print=True)
+
+        raw_lines = dymo_label_lines(item, s, position_label)
+        local_font_size = font_size
+        rendered_lines = []
+        while local_font_size >= 5.0:
+            line_height = local_font_size + 0.6
+            max_lines = max(int(available_height // line_height), 1)
+            current_lines = []
+            for text in raw_lines:
+                if len(current_lines) >= max_lines:
+                    break
+                remaining = max_lines - len(current_lines)
+                current_lines.extend(wrap_to_lines(text, font_name, local_font_size, max_width, max_lines=remaining))
+            if current_lines:
+                rendered_lines = current_lines
+                break
+            local_font_size = max(local_font_size - 0.4, 5.0)
+
+        if not rendered_lines:
+            rendered_lines = raw_lines[:1] if raw_lines else [""]
+
+        c.setFont(font_name, local_font_size)
+        y = label_h - margin_y - local_font_size
+        for line in rendered_lines:
+            c.drawString(margin_x, y, line)
+            y -= (local_font_size + 0.6)
+
+    c.save()
+    buf.seek(0)
+    return send_file(buf, as_attachment=True, download_name="etichette_dymo.pdf", mimetype="application/pdf")
 
 @app.route("/admin/cards/pdf", methods=["POST"])
 @login_required
