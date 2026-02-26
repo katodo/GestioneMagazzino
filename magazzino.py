@@ -489,6 +489,7 @@ class Item(db.Model):
     material_id     = db.Column(db.Integer, db.ForeignKey("material.id"), nullable=True)
     finish_id       = db.Column(db.Integer, db.ForeignKey("finish.id"), nullable=True)
     quantity        = db.Column(db.Integer, nullable=False, default=0)
+    updated_at      = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
     # flag etichetta
     label_show_category = db.Column(db.Boolean, nullable=False, default=True)
     label_show_subtype  = db.Column(db.Boolean, nullable=False, default=True)
@@ -507,6 +508,7 @@ class Item(db.Model):
         db.Index("ix_item_material", "material_id"),
         db.Index("ix_item_finish", "finish_id"),
         db.Index("ix_item_thread_size", "thread_size"),
+        db.Index("ix_item_updated_at", "updated_at"),
     )
 
 class Assignment(db.Model):
@@ -1065,13 +1067,24 @@ def ensure_item_columns():
     except Exception:
         return
     existing_cols = {r[1] for r in rows}
+    added = False
     if "share_drawer" not in existing_cols:
         try:
             db.session.execute(text("ALTER TABLE item ADD COLUMN share_drawer BOOLEAN DEFAULT 0"))
-            db.session.commit()
+            added = True
         except Exception:
             db.session.rollback()
             return
+    if "updated_at" not in existing_cols:
+        try:
+            db.session.execute(text("ALTER TABLE item ADD COLUMN updated_at DATETIME"))
+            db.session.execute(text("UPDATE item SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL"))
+            added = True
+        except Exception:
+            db.session.rollback()
+            return
+    if added:
+        db.session.commit()
 
 def ensure_category_columns():
     """Aggiunge colonne mancanti nella tabella category (compatibilità DB esistenti)."""
@@ -1930,6 +1943,9 @@ def _render_articles_page():
     pos_cabinet_id = request.args.get("pos_cabinet_id", type=int)
     pos_col = (request.args.get("pos_col") or "").strip().upper()
     pos_row = request.args.get("pos_row", type=int)
+    modified_recent_days = request.args.get("modified_recent_days", type=int)
+    modified_from = (request.args.get("modified_from") or "").strip()
+    modified_to = (request.args.get("modified_to") or "").strip()
 
     if text_q:
         text_q_lower = text_q.lower()
@@ -1937,6 +1953,7 @@ def _render_articles_page():
             func.lower(Item.name).contains(text_q_lower),
             func.lower(Item.description).contains(text_q_lower),
             func.lower(Item.thread_size).contains(text_q_lower),
+            func.strftime('%Y-%m-%d %H:%M', Item.updated_at).contains(text_q_lower),
         ))
     if category_id:
         items_q = items_q.filter(Item.category_id == category_id)
@@ -1968,6 +1985,22 @@ def _render_articles_page():
         if pos_row:
             pos_q = pos_q.filter(Slot.row_num == pos_row)
         items_q = items_q.filter(Item.id.in_(pos_q))
+
+    if modified_recent_days:
+        threshold = datetime.utcnow() - timedelta(days=max(1, modified_recent_days))
+        items_q = items_q.filter(Item.updated_at >= threshold)
+    if modified_from:
+        try:
+            from_dt = datetime.strptime(modified_from, "%Y-%m-%d")
+            items_q = items_q.filter(Item.updated_at >= from_dt)
+        except ValueError:
+            pass
+    if modified_to:
+        try:
+            to_dt = datetime.strptime(modified_to, "%Y-%m-%d") + timedelta(days=1)
+            items_q = items_q.filter(Item.updated_at < to_dt)
+        except ValueError:
+            pass
     items = items_q.all()
 
     categories = Category.query.order_by(Category.name).all()
@@ -2034,6 +2067,9 @@ def _render_articles_page():
         can_manage_placements=can_manage_placements,
         stock_filter=stock_filter,
         measure_q=measure_q,
+        modified_recent_days=modified_recent_days,
+        modified_from=modified_from,
+        modified_to=modified_to,
         measure_labels=measure_labels,
         current_url=current_url,
     )
@@ -2372,6 +2408,7 @@ def export_items_csv():
         "description",
         "quantity",
         "share_drawer",
+        "updated_at",
         "position",
     ])
     for item in items:
@@ -2391,6 +2428,7 @@ def export_items_csv():
             item.description or "",
             item.quantity,
             "1" if item.share_drawer else "0",
+            item.updated_at.isoformat() if item.updated_at else "",
             pos_by_item.get(item.id, ""),
         ])
     output.seek(0)
@@ -2426,7 +2464,7 @@ def export_data_json():
             "id", "category_id", "subtype_id", "name", "description", "share_drawer",
             "thread_standard", "thread_size", "inner_d_mm", "thickness_mm", "length_mm", "outer_d_mm",
             "material_id", "finish_id", "quantity", "label_show_category", "label_show_subtype",
-            "label_show_thread", "label_show_measure", "label_show_main", "label_show_material"
+            "label_show_thread", "label_show_measure", "label_show_main", "label_show_material", "updated_at"
         ]),
         "assignments": _serialize_records(Assignment.query.order_by(Assignment.id), ["id", "slot_id", "compartment_no", "item_id"]),
     }
@@ -2598,7 +2636,7 @@ def import_data():
             "id", "category_id", "subtype_id", "name", "description", "share_drawer",
             "thread_standard", "thread_size", "inner_d_mm", "thickness_mm", "length_mm", "outer_d_mm",
             "material_id", "finish_id", "quantity", "label_show_category", "label_show_subtype",
-            "label_show_thread", "label_show_measure", "label_show_main", "label_show_material"
+            "label_show_thread", "label_show_measure", "label_show_main", "label_show_material", "updated_at"
         ])
         total += _merge_records(ItemCustomFieldValue, payload.get("item_custom_field_values", []), ["id", "item_id", "field_id", "value_text"])
         total += _merge_records(Assignment, payload.get("assignments", []), ["id", "slot_id", "compartment_no", "item_id"])
@@ -2650,6 +2688,7 @@ def add_item():
         label_show_measure =bool(f.get("label_show_measure")),
         label_show_main    =bool(f.get("label_show_main")),
         label_show_material=bool(f.get("label_show_material")),
+        updated_at=datetime.utcnow(),
     )
     item.name = auto_name_for(item)
     db.session.add(item); db.session.flush()
@@ -2702,6 +2741,7 @@ def edit_item(item_id):
         item.label_show_measure  = bool(f.get("label_show_measure"))
         item.label_show_main     = bool(f.get("label_show_main"))
         item.label_show_material = bool(f.get("label_show_material"))
+        item.updated_at = datetime.utcnow()
         item.name = auto_name_for(item)
         save_custom_field_values(item, f)
         db.session.commit()
