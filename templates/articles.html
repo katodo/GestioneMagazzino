@@ -315,10 +315,28 @@
       <button class="btn btn-outline-primary btn-sm flex-grow-1">Filtra</button>
       <a href="{{ url_for('articles') }}" class="btn btn-outline-secondary btn-sm">Reset</a>
     </div>
+    <div class="col-md-2">
+      <label class="form-label small text-muted mb-1">Modificati negli ultimi</label>
+      <select name="modified_recent_days" class="form-select">
+        <option value="">Sempre</option>
+        <option value="1" {{ 'selected' if modified_recent_days == 1 else '' }}>24 ore</option>
+        <option value="3" {{ 'selected' if modified_recent_days == 3 else '' }}>3 giorni</option>
+        <option value="7" {{ 'selected' if modified_recent_days == 7 else '' }}>7 giorni</option>
+        <option value="30" {{ 'selected' if modified_recent_days == 30 else '' }}>30 giorni</option>
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small text-muted mb-1">Modifica da</label>
+      <input type="date" name="modified_from" class="form-control" value="{{ modified_from }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small text-muted mb-1">Modifica a</label>
+      <input type="date" name="modified_to" class="form-control" value="{{ modified_to }}">
+    </div>
     <div class="col-12 d-flex flex-wrap gap-2">
-      <a class="btn btn-outline-dark btn-sm {{ 'active' if stock_filter == 'available' else '' }}" href="{{ url_for('articles', stock='available', q=request.args.get('q'), category_id=request.args.get('category_id'), subtype_id=request.args.get('subtype_id'), material_id=request.args.get('material_id'), finish_id=request.args.get('finish_id'), measure=request.args.get('measure'), pos_cabinet_id=request.args.get('pos_cabinet_id'), pos_col=request.args.get('pos_col'), pos_row=request.args.get('pos_row'), share_drawer=request.args.get('share_drawer')) }}">Disponibili</a>
-      <a class="btn btn-outline-warning btn-sm {{ 'active' if stock_filter == 'low' else '' }}" href="{{ url_for('articles', stock='low', q=request.args.get('q'), category_id=request.args.get('category_id'), subtype_id=request.args.get('subtype_id'), material_id=request.args.get('material_id'), finish_id=request.args.get('finish_id'), measure=request.args.get('measure'), pos_cabinet_id=request.args.get('pos_cabinet_id'), pos_col=request.args.get('pos_col'), pos_row=request.args.get('pos_row'), share_drawer=request.args.get('share_drawer')) }}">Scorte basse</a>
-      <a class="btn btn-outline-danger btn-sm {{ 'active' if stock_filter == 'out' else '' }}" href="{{ url_for('articles', stock='out', q=request.args.get('q'), category_id=request.args.get('category_id'), subtype_id=request.args.get('subtype_id'), material_id=request.args.get('material_id'), finish_id=request.args.get('finish_id'), measure=request.args.get('measure'), pos_cabinet_id=request.args.get('pos_cabinet_id'), pos_col=request.args.get('pos_col'), pos_row=request.args.get('pos_row'), share_drawer=request.args.get('share_drawer')) }}">Esauriti</a>
+      <a class="btn btn-outline-dark btn-sm {{ 'active' if stock_filter == 'available' else '' }}" href="{{ url_for('articles', stock='available', q=request.args.get('q'), category_id=request.args.get('category_id'), subtype_id=request.args.get('subtype_id'), material_id=request.args.get('material_id'), finish_id=request.args.get('finish_id'), measure=request.args.get('measure'), pos_cabinet_id=request.args.get('pos_cabinet_id'), pos_col=request.args.get('pos_col'), pos_row=request.args.get('pos_row'), share_drawer=request.args.get('share_drawer'), modified_recent_days=request.args.get('modified_recent_days'), modified_from=request.args.get('modified_from'), modified_to=request.args.get('modified_to')) }}">Disponibili</a>
+      <a class="btn btn-outline-warning btn-sm {{ 'active' if stock_filter == 'low' else '' }}" href="{{ url_for('articles', stock='low', q=request.args.get('q'), category_id=request.args.get('category_id'), subtype_id=request.args.get('subtype_id'), material_id=request.args.get('material_id'), finish_id=request.args.get('finish_id'), measure=request.args.get('measure'), pos_cabinet_id=request.args.get('pos_cabinet_id'), pos_col=request.args.get('pos_col'), pos_row=request.args.get('pos_row'), share_drawer=request.args.get('share_drawer'), modified_recent_days=request.args.get('modified_recent_days'), modified_from=request.args.get('modified_from'), modified_to=request.args.get('modified_to')) }}">Scorte basse</a>
+      <a class="btn btn-outline-danger btn-sm {{ 'active' if stock_filter == 'out' else '' }}" href="{{ url_for('articles', stock='out', q=request.args.get('q'), category_id=request.args.get('category_id'), subtype_id=request.args.get('subtype_id'), material_id=request.args.get('material_id'), finish_id=request.args.get('finish_id'), measure=request.args.get('measure'), pos_cabinet_id=request.args.get('pos_cabinet_id'), pos_col=request.args.get('pos_col'), pos_row=request.args.get('pos_row'), share_drawer=request.args.get('share_drawer'), modified_recent_days=request.args.get('modified_recent_days'), modified_from=request.args.get('modified_from'), modified_to=request.args.get('modified_to')) }}">Esauriti</a>
     </div>
   </form>
 
@@ -331,6 +349,7 @@
           <tr>
             {% if can_manage_items %}<th style="width:36px;"><input type="checkbox" id="chkAll"></th>{% endif %}
             <th>ID</th>
+            <th>Ultima modifica</th>
             <th>Categoria</th>
             <th>Nome</th>
             <th>Misura</th>
@@ -348,6 +367,7 @@
           <tr {% if can_manage_items %}data-edit-url="{{ url_for('edit_item', item_id=it.id, next=current_url) }}"{% endif %}>
             {% if can_manage_items %}<td><input type="checkbox" name="item_ids" value="{{ it.id }}"></td>{% endif %}
             <td>{{ it.id }}</td>
+            <td data-order="{{ it.updated_at.isoformat() if it.updated_at else '' }}">{{ it.updated_at.strftime('%d/%m/%Y %H:%M') if it.updated_at else '' }}</td>
             <td>{% if it.category %}<span class="badge-color" style="background:{{ it.category.color }}"></span>{{ it.category.name }}{% endif %}</td>
             <td>{{ compose_caption(it) }}</td>
             <td>{{ it.thread_size or "" }}</td>
