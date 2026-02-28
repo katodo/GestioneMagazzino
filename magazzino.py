@@ -4870,6 +4870,7 @@ def labels_pdf():
                 "position": (cab, slot),
                 "slot_id": slot_key,
                 "is_multi": len(slot_items) > 1,
+                "has_print_override": bool(slot and (slot.print_label_override or "").strip()),
                 "color": slot_items[0].category.color if slot_items and slot_items[0].category else "#000000",
             })
         else:
@@ -4878,6 +4879,7 @@ def labels_pdf():
                 "position": (None, None),
                 "slot_id": None,
                 "is_multi": False,
+                "has_print_override": False,
                 "color": item.category.color if item.category else "#000000",
             })
     for entry in label_entries:
@@ -4920,8 +4922,9 @@ def labels_pdf():
         pos_data = entry.get("position") or (None, None)
         cab, slot = pos_data
 
-        # Se più articoli condividono il cassetto, stampo solo il nome configurato (senza colore né QR)
-        if entry.get("is_multi"):
+        # Se il cassetto è condiviso o ha una label di stampa personalizzata,
+        # stampo il nome cassetto come etichetta principale (stile cassetto multi-articolo).
+        if entry.get("is_multi") or entry.get("has_print_override"):
             col_code = getattr(slot, "col_code", "") or ""
             row_num = getattr(slot, "row_num", None)
             label_txt = slot_label(slot, for_display=False, fallback_col=col_code, fallback_row=row_num) or ""
