@@ -3028,9 +3028,7 @@ def move_item_slot(item_id):
         flash("Scomparti insufficienti nel cassetto destinazione.", "danger")
         return redirect(url_for("edit_item", item_id=item.id))
 
-    for a in src_assigns:
-        a.slot_id = dst_slot.id
-    _reassign_compartments(dst_slot.id, cab_to_obj)
+    _move_slot_assignments(src_slot, dst_slot, cab_to_obj, move_labels=True)
     db.session.commit()
     flash("Cassetto spostato.", "success")
     return redirect(url_for("edit_item", item_id=item.id))
@@ -3765,6 +3763,19 @@ def _reassign_compartments(slot_id:int, cabinet:Cabinet):
         if n>max_comp: raise RuntimeError("Capienza scomparti superata.")
         a.compartment_no = n; n += 1
 
+def _move_slot_assignments(src_slot: Slot, dst_slot: Slot, dst_cabinet: Cabinet, *, move_labels: bool = False):
+    src_assigns = Assignment.query.filter_by(slot_id=src_slot.id).all()
+    for a in src_assigns:
+        a.slot_id = dst_slot.id
+
+    if move_labels:
+        dst_slot.display_label_override = src_slot.display_label_override
+        dst_slot.print_label_override = src_slot.print_label_override
+        src_slot.display_label_override = None
+        src_slot.print_label_override = None
+
+    _reassign_compartments(dst_slot.id, dst_cabinet)
+
 @app.route("/admin/slots/block", methods=["POST"])
 @login_required
 def block_slot():
@@ -3849,8 +3860,7 @@ def move_slot():
     if not do_swap:
         if not _slot_capacity_ok(cab_to_obj, len(dst_assigns)+len(src_assigns), dst.col_code, dst.row_num):
             return _flash_back("Scomparti insufficienti nel cassetto destinazione.", "danger", "admin_config")
-        for a in src_assigns: a.slot_id = dst.id
-        _reassign_compartments(dst.id, cab_to_obj)
+        _move_slot_assignments(src, dst, cab_to_obj, move_labels=True)
         db.session.commit(); flash("Cassetto spostato.", "success")
     else:
         if (
