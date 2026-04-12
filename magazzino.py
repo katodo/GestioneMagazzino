@@ -2308,6 +2308,47 @@ def api_item(item_id):
         "position": full_pos
     })
 
+@app.route("/api/search")
+def api_search():
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 2:
+        return jsonify([])
+    pattern = f"%{q}%"
+    items = (
+        Item.query
+        .join(Item.category)
+        .filter(
+            or_(
+                Item.name.ilike(pattern),
+                Category.name.ilike(pattern),
+                Item.thread_size.ilike(pattern),
+                Item.description.ilike(pattern),
+            )
+        )
+        .order_by(Item.name)
+        .limit(10)
+        .all()
+    )
+    results = []
+    for item in items:
+        asgn = (
+            db.session.query(Assignment, Slot, Cabinet)
+            .join(Slot, Assignment.slot_id == Slot.id)
+            .join(Cabinet, Slot.cabinet_id == Cabinet.id)
+            .filter(Assignment.item_id == item.id)
+            .first()
+        )
+        pos = slot_full_label(asgn[2], asgn[1], for_print=False) if asgn else None
+        results.append({
+            "id": item.id,
+            "name": auto_name_for(item),
+            "category": item.category.name if item.category else None,
+            "category_color": item.category.color if item.category else None,
+            "quantity": item.quantity,
+            "position": pos,
+        })
+    return jsonify(results)
+
 @app.route("/api/slots/lookup")
 def api_slot_lookup():
     cab_id = request.args.get("cabinet_id", type=int)

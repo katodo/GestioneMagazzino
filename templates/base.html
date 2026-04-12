@@ -173,10 +173,85 @@
   </style>
 </head>
 <body>
+  <!-- Global Search Styles -->
+  <style>
+    .global-search-wrap { position: relative; }
+    .global-search-input {
+      width: 0;
+      opacity: 0;
+      padding: 0;
+      border: none;
+      transition: width .25s ease, opacity .25s ease, padding .25s ease;
+      pointer-events: none;
+    }
+    .global-search-wrap.open .global-search-input {
+      width: 220px;
+      opacity: 1;
+      padding: .25rem .5rem;
+      pointer-events: auto;
+    }
+    @media (max-width: 576px) {
+      .global-search-wrap.open .global-search-input { width: 140px; }
+    }
+    .search-dropdown {
+      display: none;
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      min-width: 320px;
+      background: var(--panel-bg, #fff);
+      border: 1px solid var(--panel-border, rgba(0,0,0,.12));
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.18);
+      z-index: 2000;
+      overflow: hidden;
+    }
+    .search-dropdown.visible { display: block; }
+    .search-result-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 14px;
+      cursor: pointer;
+      border-bottom: 1px solid var(--panel-border, rgba(0,0,0,.06));
+      color: var(--page-text, #212529);
+      text-decoration: none;
+    }
+    .search-result-item:last-child { border-bottom: none; }
+    .search-result-item:hover,
+    .search-result-item.active { background: rgba(99,130,255,.12); }
+    .search-result-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .search-result-name { font-weight: 600; font-size: 13px; flex: 1; }
+    .search-result-pos {
+      font-size: 11px;
+      background: rgba(99,130,255,.18);
+      color: #6382ff;
+      padding: 1px 7px;
+      border-radius: 20px;
+      white-space: nowrap;
+    }
+    .search-no-results { padding: 14px; color: var(--muted-text, #6c757d); font-size: 13px; text-align: center; }
+    .search-loading { padding: 14px; text-align: center; }
+  </style>
   <nav class="navbar navbar-dark bg-dark">
     <div class="container-fluid">
       <a class="navbar-brand" href="/">Magazzino</a>
       <div class="d-flex flex-wrap gap-2 align-items-center">
+        <!-- Global Search -->
+        <div class="global-search-wrap d-flex align-items-center gap-1" id="globalSearchWrap">
+          <input type="text" class="form-control form-control-sm global-search-input" id="globalSearchInput"
+                 placeholder="Cerca articolo..." autocomplete="off" aria-label="Ricerca globale">
+          <button class="btn btn-outline-light btn-sm" id="globalSearchBtn" aria-label="Apri ricerca" title="Ricerca rapida (/)">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+              <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.099zm-5.242 1.156a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11z"/>
+            </svg>
+          </button>
+          <div class="search-dropdown" id="searchDropdown" role="listbox"></div>
+        </div>
         <button class="btn btn-outline-light btn-sm d-flex align-items-center gap-2" type="button" id="themeToggle" aria-pressed="false">
           <span class="theme-label">Dark</span>
         </button>
@@ -270,6 +345,119 @@
           }
           form.classList.add('was-validated');
         }, false);
+      });
+
+      // --- Global Search Autocomplete ---
+      const searchWrap = document.getElementById('globalSearchWrap');
+      const searchBtn  = document.getElementById('globalSearchBtn');
+      const searchInput = document.getElementById('globalSearchInput');
+      const searchDropdown = document.getElementById('searchDropdown');
+      let searchTimer = null;
+      let activeIdx = -1;
+      let lastResults = [];
+
+      function openSearch() {
+        searchWrap.classList.add('open');
+        searchInput.focus();
+      }
+      function closeSearch() {
+        searchWrap.classList.remove('open');
+        searchDropdown.classList.remove('visible');
+        searchInput.value = '';
+        lastResults = [];
+        activeIdx = -1;
+      }
+      function renderResults(items) {
+        lastResults = items;
+        activeIdx = -1;
+        if (!items.length) {
+          searchDropdown.innerHTML = '<div class="search-no-results">Nessun risultato</div>';
+        } else {
+          searchDropdown.innerHTML = items.map((it, i) => {
+            const dot = it.category_color
+              ? `<span class="search-result-dot" style="background:${it.category_color}"></span>`
+              : `<span class="search-result-dot" style="background:#aaa"></span>`;
+            const pos = it.position
+              ? `<span class="search-result-pos">${it.position}</span>`
+              : '';
+            return `<a class="search-result-item" href="/articoli?q=${encodeURIComponent(it.name)}" role="option" data-idx="${i}">
+              ${dot}
+              <span class="search-result-name">${it.name}</span>
+              ${pos}
+            </a>`;
+          }).join('');
+        }
+        searchDropdown.classList.add('visible');
+        searchDropdown.querySelectorAll('.search-result-item').forEach(el => {
+          el.addEventListener('mousedown', e => e.preventDefault());
+        });
+      }
+      function doSearch(q) {
+        if (q.length < 2) { searchDropdown.classList.remove('visible'); return; }
+        searchDropdown.innerHTML = '<div class="search-loading"><div class="spinner-border spinner-border-sm text-secondary" role="status"></div></div>';
+        searchDropdown.classList.add('visible');
+        fetch(`/api/search?q=${encodeURIComponent(q)}`)
+          .then(r => r.json())
+          .then(renderResults)
+          .catch(() => { searchDropdown.classList.remove('visible'); });
+      }
+      function setActive(idx) {
+        const items = searchDropdown.querySelectorAll('.search-result-item');
+        items.forEach(el => el.classList.remove('active'));
+        if (idx >= 0 && idx < items.length) {
+          items[idx].classList.add('active');
+          items[idx].scrollIntoView({ block: 'nearest' });
+        }
+        activeIdx = idx;
+      }
+
+      searchBtn.addEventListener('click', () => {
+        if (searchWrap.classList.contains('open')) {
+          if (searchInput.value.trim()) {
+            window.location.href = `/articoli?q=${encodeURIComponent(searchInput.value.trim())}`;
+          } else {
+            closeSearch();
+          }
+        } else {
+          openSearch();
+        }
+      });
+      searchInput.addEventListener('input', () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => doSearch(searchInput.value.trim()), 250);
+      });
+      searchInput.addEventListener('keydown', e => {
+        const items = searchDropdown.querySelectorAll('.search-result-item');
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setActive(Math.min(activeIdx + 1, items.length - 1));
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setActive(Math.max(activeIdx - 1, -1));
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          if (activeIdx >= 0 && items[activeIdx]) {
+            window.location.href = items[activeIdx].href;
+          } else if (searchInput.value.trim()) {
+            window.location.href = `/articoli?q=${encodeURIComponent(searchInput.value.trim())}`;
+          }
+        } else if (e.key === 'Escape') {
+          closeSearch();
+        }
+      });
+      searchInput.addEventListener('blur', () => {
+        setTimeout(() => {
+          if (!searchWrap.contains(document.activeElement)) {
+            searchDropdown.classList.remove('visible');
+          }
+        }, 150);
+      });
+      // Shortcut '/' per aprire la ricerca
+      document.addEventListener('keydown', e => {
+        if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA' && document.activeElement.tagName !== 'SELECT') {
+          e.preventDefault();
+          openSearch();
+        }
       });
     });
   </script>
