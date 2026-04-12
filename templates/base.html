@@ -256,11 +256,8 @@
           <span class="theme-label">Dark</span>
         </button>
         <a href="{{ url_for('articles') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint in ['articles','index','admin_items'] else '' }}">Articoli</a>
-        <a href="{{ url_for('cassettiere') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint == 'cassettiere' else '' }}">Casssettiere</a>
+        <a href="{{ url_for('cassettiere') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint in ['cassettiere','placements','auto_assign'] else '' }}">Cassettiere</a>
         {% if current_user.is_authenticated %}
-          {% if current_user.has_permission('manage_placements') %}
-            <a href="{{ url_for('placements') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint in ['placements','to_place','auto_assign'] else '' }}">Posizionamento</a>
-          {% endif %}
           {% if current_user.has_permission('manage_config') or current_user.has_permission('manage_users') or current_user.has_permission('manage_roles') %}
             <a href="{{ url_for('admin_config') }}" class="btn btn-outline-light btn-sm {{ 'active' if request.endpoint == 'admin_config' else '' }}">Configurazione</a>
           {% endif %}

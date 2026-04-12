@@ -67,6 +67,7 @@
     opacity: 0; transition: opacity .4s;
   }
   .zoom-hint.show { opacity: 1; }
+  #grid td.placement-start { outline: 3px solid #0d6efd; outline-offset: -2px; }
 </style>
 
 <div class="grid-wrap p-2" id="gridWrap" style="position:relative">
@@ -133,6 +134,161 @@
     <div class="text-muted p-3">Configura una cassettiera per visualizzare la griglia.</div>
   {% endif %}
 </div>
+
+{% if can_manage_placements and sort_options is defined %}
+<div id="placementPanel" class="mt-4">
+  <h4 class="mb-3">Posizionamento automatico</h4>
+  <div class="form-section mb-3">
+    <form method="post" id="autoAssignForm" action="{{ url_for('cassettiere') }}">
+      <input type="hidden" name="action" id="formAction" value="auto_assign">
+      <input type="hidden" name="clear_scope" id="clearScope" value="all">
+      <div class="row g-2">
+        <div class="col-md-3">
+          <label class="form-label">Cassettiera</label>
+          <select name="cabinet_id" class="form-select" required>
+            {% for c in cabinets %}
+              <option value="{{ c.id }}" {{ 'selected' if c.id == form_cabinet_id else '' }}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Categoria</label>
+          <select name="category_id" class="form-select" id="categorySelect" required>
+            {% for c in categories %}
+              <option value="{{ c.id }}" data-unplaced="{{ unplaced_by_category.get(c.id, 0) }}" {{ 'selected' if c.id == form_category_id else '' }}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+          <div class="form-text">Articoli non posizionati: <span id="unplacedCount">{{ unplaced_count if unplaced_count is not none else '' }}</span></div>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Numero di articoli</label>
+          <input type="number" min="0" class="form-control" id="countInput" name="count" value="{{ count or 10 }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Direzione</label>
+          <select name="direction" class="form-select">
+            <option value="H" {{ 'selected' if direction == 'H' else '' }}>Orizzontale</option>
+            <option value="V" {{ 'selected' if direction == 'V' else '' }}>Verticale</option>
+          </select>
+          <div class="form-text">Orizzontale: sinistra→destra, poi riga successiva. Verticale: alto→basso, poi colonna.</div>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Cella di partenza</label>
+          <div class="input-group">
+            <span class="input-group-text">Col</span>
+            <input type="text" class="form-control" name="start_col" id="start_col" value="{{ start_col or '' }}" maxlength="2" placeholder="es. A">
+            <span class="input-group-text">Riga</span>
+            <input type="number" class="form-control" name="start_row" id="start_row" value="{{ start_row or '' }}" min="1" max="128">
+          </div>
+          <div class="form-text">Puoi anche cliccare una cella nella griglia qui sopra.</div>
+        </div>
+        <div class="col-md-4 d-flex align-items-end">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" value="1" id="clear_occupied" name="clear_occupied" {{ 'checked' if clear_occupied else '' }}>
+            <label class="form-check-label" for="clear_occupied">
+              De-alloca celle già popolate nel percorso
+            </label>
+          </div>
+        </div>
+        <div class="col-12">
+          <div class="border rounded-3 bg-light-subtle p-3">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+              <div>
+                <div class="fw-semibold">Chiavi di ordinamento</div>
+                <div class="small text-muted">Definisci l'ordine di priorità dalla primaria alla quarta.</div>
+              </div>
+              <div class="small text-muted">Suggerimento: per le viti usa Misura → Sottotipo → Lunghezza → Materiale.</div>
+            </div>
+            <div class="row g-2 align-items-end">
+              <div class="col-lg-3 col-md-6">
+                <label class="form-label">Primaria</label>
+                <select name="primary_key" class="form-select" id="primaryKeySelect">
+                  {% for v, label in sort_options %}
+                    <option value="{{ v }}" {{ 'selected' if v == primary_key else '' }}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-lg-3 col-md-6">
+                <label class="form-label">Secondaria</label>
+                <select name="secondary_key" class="form-select" id="secondaryKeySelect">
+                  <option value="">(nessuna)</option>
+                  {% for v, label in sort_options %}
+                    <option value="{{ v }}" {{ 'selected' if v == secondary_key else '' }}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-lg-3 col-md-6">
+                <label class="form-label">Terza</label>
+                <select name="tertiary_key" class="form-select" id="tertiaryKeySelect">
+                  <option value="">(nessuna)</option>
+                  {% for v, label in sort_options %}
+                    <option value="{{ v }}" {{ 'selected' if v == tertiary_key else '' }}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-lg-3 col-md-6">
+                <label class="form-label">Quarta</label>
+                <select name="quaternary_key" class="form-select" id="quaternaryKeySelect">
+                  <option value="">(nessuna)</option>
+                  {% for v, label in sort_options %}
+                    <option value="{{ v }}" {{ 'selected' if v == quaternary_key else '' }}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+            <div class="mt-3">
+              <div class="small text-muted mb-1">Anteprima ordinamento (esempio dinamico)</div>
+              <div class="border rounded bg-white p-2">
+                <ol class="mb-0 small" id="sortPreviewList"></ol>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="col-12">
+          <div class="row g-3 align-items-start flex-wrap">
+            <div class="col-lg">
+              <div class="alert alert-light border small mb-0">
+                <div class="fw-semibold mb-1">Come usare le de-allocazioni</div>
+                <ul class="mb-0 ps-3">
+                  <li>Imposta colonna, riga, direzione e numero per "De-alloca area"; lascia i campi vuoti per agire su tutta la categoria.</li>
+                  <li>La de-allocazione comporta la ristampa di tutte le etichette e il riposizionamento dei cassetti.</li>
+                </ul>
+              </div>
+            </div>
+            <div class="col-lg-auto d-flex flex-wrap justify-content-lg-end gap-2">
+              <button type="submit" class="btn btn-outline-warning" id="clearAreaBtn">De-alloca area</button>
+              <button type="submit" class="btn btn-outline-danger" id="clearCategoryBtn">De-alloca categoria</button>
+              <button class="btn btn-primary" id="autoAssignBtn" type="submit">Assegna automaticamente</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <div class="form-section mt-3">
+    <h5 class="mb-2">Articoli da posizionare</h5>
+    <div class="table-responsive table-sticky">
+      <table class="table table-striped align-middle mb-0" id="tbl">
+        <thead><tr><th>ID</th><th>Categoria</th><th>Descrizione</th><th>Misura</th><th>Azioni</th></tr></thead>
+        <tbody>
+          {% for it in items_to_place %}
+          <tr>
+            <td>{{ it.id }}</td>
+            <td>{% if it.category %}<span class="badge-color" style="background:{{ it.category.color }}"></span>{{ it.category.name }}{% endif %}</td>
+            <td>{{ compose_caption(it) }}</td>
+            <td>{{ it.thread_size or '' }}</td>
+            <td class="text-nowrap">
+              <a href="{{ url_for('edit_item', item_id=it.id) }}" class="btn btn-sm btn-outline-primary">Modifica</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
 
 {% if can_manage_placements %}
 <!-- Modal assegnazione -->
@@ -631,6 +787,16 @@ document.addEventListener('DOMContentLoaded', function(){
 
     publishSlotMqtt(col, row);
 
+    // Update placement form start position
+    const _sc = document.getElementById('start_col');
+    const _sr = document.getElementById('start_row');
+    if (_sc) _sc.value = col;
+    if (_sr) _sr.value = row;
+    if (_sc || _sr) {
+      grid.querySelectorAll('td.placement-start').forEach(c => c.classList.remove('placement-start'));
+      td.classList.add('placement-start');
+    }
+
     if (!IS_ADMIN) {
       pendingUsedCell = null;
       return;
@@ -788,6 +954,139 @@ document.addEventListener('DOMContentLoaded', function(){
         }
       }
     });
+  }
+
+  // --- Placement form JS ---
+  const autoAssignForm = document.getElementById('autoAssignForm');
+  if (autoAssignForm) {
+    const formAction = document.getElementById('formAction');
+    const clearScope = document.getElementById('clearScope');
+    const startColInput = document.getElementById('start_col');
+    const startRowInput = document.getElementById('start_row');
+    const categorySelect = document.getElementById('categorySelect');
+    const countInput = document.getElementById('countInput');
+    const unplacedCountEl = document.getElementById('unplacedCount');
+    const primaryKeySelect = document.getElementById('primaryKeySelect');
+    const secondaryKeySelect = document.getElementById('secondaryKeySelect');
+    const tertiaryKeySelect = document.getElementById('tertiaryKeySelect');
+    const quaternaryKeySelect = document.getElementById('quaternaryKeySelect');
+    const previewList = document.getElementById('sortPreviewList');
+
+    if (categorySelect && countInput) {
+      categorySelect.addEventListener('change', function() {
+        const selected = categorySelect.options[categorySelect.selectedIndex];
+        const unplacedValue = selected ? selected.dataset.unplaced : '';
+        countInput.value = unplacedValue ?? 0;
+        if (unplacedCountEl) unplacedCountEl.textContent = unplacedValue ?? '';
+      });
+    }
+
+    const sampleItems = [
+      { name: 'Vite Bombata Croce', subtype: 'Bombata Croce', thread_size: 'M2', length_mm: 8, material: 'Acciaio' },
+      { name: 'Vite Bombata Croce', subtype: 'Bombata Croce', thread_size: 'M2', length_mm: 12, material: 'Acciaio' },
+      { name: 'Vite Cilindrica Esagonale', subtype: 'Cilindrica Esagonale', thread_size: 'M2', length_mm: 8, material: 'Acciaio' },
+      { name: 'Vite Bombata Croce', subtype: 'Bombata Croce', thread_size: 'M2.5', length_mm: 10, material: 'Acciaio' },
+      { name: 'Vite Bombata Croce', subtype: 'Bombata Croce', thread_size: 'M3', length_mm: 8, material: 'Acciaio' },
+      { name: 'Vite Cilindrica Esagonale', subtype: 'Cilindrica Esagonale', thread_size: 'M3', length_mm: 8, material: 'Inox' },
+    ];
+
+    function parseThreadSizePl(value) {
+      const raw = (value || '').trim().toUpperCase();
+      const match = raw.match(/^([A-Z]*)(\d+(?:[.,]\d+)?)?/);
+      const prefix = match ? match[1] : raw;
+      const number = match && match[2] ? parseFloat(match[2].replace(',', '.')) : Number.NaN;
+      return { prefix, number };
+    }
+
+    function compareValuesPl(a, b) {
+      if (a === b) return 0;
+      if (a === null || a === undefined || a === '') return 1;
+      if (b === null || b === undefined || b === '') return -1;
+      if (typeof a === 'number' && typeof b === 'number') return a - b;
+      return String(a).localeCompare(String(b), 'it', { numeric: true, sensitivity: 'base' });
+    }
+
+    function compareByKeyPl(a, b, key) {
+      if (!key) return 0;
+      if (key === 'thread_size') {
+        const pa = parseThreadSizePl(a.thread_size), pb = parseThreadSizePl(b.thread_size);
+        const d = compareValuesPl(pa.prefix, pb.prefix);
+        return d !== 0 ? d : compareValuesPl(pa.number, pb.number);
+      }
+      if (key === 'length_mm') return compareValuesPl(a.length_mm, b.length_mm);
+      if (key === 'material') return compareValuesPl(a.material, b.material);
+      if (key === 'subtype') return compareValuesPl(a.subtype, b.subtype);
+      return 0;
+    }
+
+    function updateSortPreview() {
+      if (!previewList) return;
+      const keys = [primaryKeySelect?.value, secondaryKeySelect?.value, tertiaryKeySelect?.value, quaternaryKeySelect?.value].filter(Boolean);
+      const sorted = [...sampleItems].sort((a, b) => {
+        for (const key of keys) { const d = compareByKeyPl(a, b, key); if (d !== 0) return d; }
+        return 0;
+      });
+      previewList.innerHTML = sorted.map(item =>
+        `<li>${escapeHtml(item.name + ' ' + item.thread_size + ' L' + item.length_mm + ' ' + item.material)}</li>`
+      ).join('');
+    }
+
+    [primaryKeySelect, secondaryKeySelect, tertiaryKeySelect, quaternaryKeySelect].forEach(sel => {
+      if (sel) sel.addEventListener('change', updateSortPreview);
+    });
+    updateSortPreview();
+
+    autoAssignForm.addEventListener('submit', async function(ev) {
+      const submitter = ev.submitter || null;
+      const isClearArea = submitter && submitter.id === 'clearAreaBtn';
+      const isClearCategory = submitter && submitter.id === 'clearCategoryBtn';
+      const isAutoAssign = !isClearArea && !isClearCategory;
+
+      const colVal = (startColInput?.value || '').trim().toUpperCase();
+      const rowVal = (startRowInput?.value || '').trim();
+      const countVal = parseInt(document.getElementById('countInput')?.value || '0', 10);
+      const direction = (autoAssignForm.querySelector('select[name="direction"]')?.value || 'H').toUpperCase();
+
+      if (startColInput) startColInput.value = colVal;
+      if (startRowInput) startRowInput.value = rowVal;
+
+      if (isAutoAssign) {
+        if (!colVal || !rowVal) {
+          ev.preventDefault();
+          alert('Seleziona una cella di partenza cliccando sulla griglia o compilando i campi dedicati.');
+          return;
+        }
+        if (formAction) formAction.value = 'auto_assign';
+        if (clearScope) clearScope.value = 'all';
+        return;
+      }
+
+      ev.preventDefault();
+      if (formAction) formAction.value = 'clear_category';
+      if (clearScope) clearScope.value = isClearArea ? 'range' : 'all';
+
+      if (isClearArea) {
+        if (!colVal || !rowVal || !countVal || Number.isNaN(countVal) || countVal <= 0) {
+          alert("Per de-allocare un'area, compila colonna, riga e numero di celle.");
+          return;
+        }
+        const dirLabel = direction === 'V' ? 'verticale' : 'orizzontale';
+        if (!await window.confirmAction(`De-allocare ${countVal} celle (${dirLabel}) a partire da ${colVal}${rowVal}?`)) return;
+      } else {
+        if (!await window.confirmAction('Confermi di voler de-allocare TUTTA la categoria dalla cassettiera selezionata?')) return;
+      }
+      if (!await window.confirmAction('Operazione invasiva: sarà necessario ristampare tutte le etichette e riposizionare i cassetti. Procedere comunque?')) return;
+      autoAssignForm.submit();
+    });
+
+    if (typeof $ !== 'undefined' && $.fn && $.fn.DataTable) {
+      $('#tbl').DataTable({
+        pageLength: 50,
+        lengthMenu: [10, 25, 50, 100],
+        order: [[1, 'asc']],
+        language: { search: 'Cerca nella tabella:' }
+      });
+    }
   }
   {% endif %}
 

@@ -2240,36 +2240,9 @@ def build_full_grid(cabinet_id:int):
         "merge_skips": merge_skips,
     }
 
-@app.route("/cassettiere")
+@app.route("/cassettiere", methods=["GET", "POST"])
 def cassettiere():
-    cab_id = request.args.get("cabinet_id", type=int)
-    cabinets = Cabinet.query.order_by(Cabinet.name).all()
-    if not cab_id and cabinets:
-        cab_id = cabinets[0].id
-    grid = build_full_grid(cab_id) if cab_id else {"rows": [], "cols": [], "cells": {}, "cab": None}
-
-    categories = Category.query.order_by(Category.name).all()
-    subq = select(Assignment.item_id)
-    unplaced_json = []
-    can_manage_placements = current_user.is_authenticated and current_user.has_permission("manage_placements")
-    can_manage_items = current_user.is_authenticated and current_user.has_permission("manage_items")
-    if can_manage_placements:
-        unplaced = Item.query.filter(Item.id.not_in(subq)).all()
-        unplaced_json = [
-            {"id": it.id, "caption": auto_name_for(it), "category_id": it.category_id}
-            for it in unplaced
-        ]
-
-    return render_template(
-        "cassettiere.html",
-        categories=categories,
-        cabinets=cabinets,
-        selected_cab_id=cab_id,
-        grid=grid,
-        unplaced_json=unplaced_json,
-        can_manage_placements=can_manage_placements,
-        can_manage_items=can_manage_items,
-    )
+    return _placements_internal("cassettiere")
 
 def short_cell_text(item: Item) -> str:
     lines = label_lines_for_item(item)
@@ -4455,7 +4428,7 @@ def _deallocate_category_from_cabinet(
     }
 
 
-def _placements_internal():
+def _placements_internal(target_endpoint="cassettiere"):
     cabinets = Cabinet.query.order_by(Cabinet.name).all()
     categories = Category.query.order_by(Category.name).all()
     sort_options = [
@@ -4482,8 +4455,6 @@ def _placements_internal():
 
     if not form_cabinet_id and cabinets:
         form_cabinet_id = cabinets[0].id
-
-    target_endpoint = "placements"
 
     if request.method == "POST":
         form = request.form
@@ -4656,12 +4627,22 @@ def _placements_internal():
     items_to_place = Item.query.filter(Item.id.not_in(subq)).all()
 
     can_manage_placements = current_user.is_authenticated and current_user.has_permission("manage_placements")
+    can_manage_items = current_user.is_authenticated and current_user.has_permission("manage_items")
+    unplaced_json = [
+        {"id": it.id, "caption": auto_name_for(it), "category_id": it.category_id}
+        for it in items_to_place
+    ] if can_manage_placements else []
+
     return render_template(
-        "admin/placements.html",
-        cabinets=cabinets,
+        "cassettiere.html",
         categories=categories,
-        sort_options=sort_options,
+        cabinets=cabinets,
+        selected_cab_id=form_cabinet_id,
         grid=grid,
+        unplaced_json=unplaced_json,
+        can_manage_placements=can_manage_placements,
+        can_manage_items=can_manage_items,
+        sort_options=sort_options,
         form_cabinet_id=form_cabinet_id,
         form_category_id=form_category_id,
         primary_key=primary_key,
@@ -4676,18 +4657,21 @@ def _placements_internal():
         unplaced_count=unplaced_count,
         unplaced_by_category=unplaced_by_category,
         items_to_place=items_to_place,
-        can_manage_placements=can_manage_placements,
     )
 
 @app.route("/admin/posizionamento", methods=["GET", "POST"])
 @login_required
 def placements():
-    return _placements_internal()
+    if request.method == "GET":
+        return redirect(url_for("cassettiere", **request.args))
+    return _placements_internal("cassettiere")
 
 @app.route("/admin/auto_assign", methods=["GET", "POST"])
 @login_required
 def auto_assign():
-    return _placements_internal()
+    if request.method == "GET":
+        return redirect(url_for("cassettiere", **request.args))
+    return _placements_internal("cassettiere")
 
 
 # ===================== ETICHETTE PDF =====================
