@@ -157,6 +157,7 @@ def _create_backup(reason: str) -> Optional[str]:
         if not os.path.exists(db_path):
             return None
         shutil.copy2(db_path, backup_path)
+        os.utime(backup_path, None)  # set mtime=now so rotation keeps this file
         _rotate_backups()
         state = _load_backup_state()
         state["last_backup_time"] = os.path.getmtime(backup_path)
